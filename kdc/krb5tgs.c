@@ -1648,7 +1648,7 @@ server_lookup:
 			NULL, NULL, &server);
 
     if (ret == HDB_ERR_NOT_FOUND_HERE) {
-	kdc_log(context, config, 5, "target %s does not have secrets at this KDC, need to proxy", sp);
+	kdc_log(context, config, 5, "target %s does not have secrets at this KDC, need to proxy", spn);
 	goto out;
     } else if (ret == HDB_ERR_WRONG_REALM) {
         free(ref_realm);
@@ -2056,7 +2056,7 @@ server_lookup:
 			ret = KRB5KDC_ERR_C_PRINCIPAL_UNKNOWN;
 		    msg = krb5_get_error_message(context, ret);
 		    kdc_log(context, config, 1,
-			    "S2U4Self principal to impersonate %s not found in database: %s",
+			    "S4U2Self principal to impersonate %s not found in database: %s",
 			    tpn, msg);
 		    krb5_free_error_message(context, msg);
 		    goto out;
