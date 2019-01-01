@@ -807,7 +807,7 @@ tgs_make_reply(krb5_context context,
     if(ret)
 	goto out;
 
-    ret = copy_Realm(&server_principal->realm, &rep.ticket.realm);
+    ret = copy_Realm(&server->entry.principal->realm, &rep.ticket.realm);
     if (ret)
 	goto out;
     _krb5_principal2principalname(&rep.ticket.sname, server_principal);
@@ -1248,9 +1248,9 @@ tgs_parse_request(krb5_context context,
 	ret = krb5_unparse_name(context, princ, &p);
 	if (ret != 0)
 	    p = failed;
-	krb5_free_principal(context, princ);
 	kdc_log(context, config, 0,
-		"Ticket-granting ticket not found in database: %s", msg);
+		"Ticket-granting ticket %s not found in database: %s", p, msg);
+	krb5_free_principal(context, princ);
 	krb5_free_error_message(context, msg);
 	if (ret == 0)
 	    free(p);

@@ -98,7 +98,6 @@ asn1_*.[cx]
 /appl/kf/kfd
 /appl/otp/otp
 /appl/otp/otpprint
-/appl/su/su
 /appl/test/gssapi_client
 /appl/test/gssapi_server
 /appl/test/http_client
@@ -233,7 +232,6 @@ asn1_*.[cx]
 /lib/hcrypto/test_rand
 /lib/hcrypto/test_rsa
 /lib/hcrypto/unix
-/lib/roken/test-detach
 /lib/hdb/hdb-protos.h
 /lib/hdb/hdb-private.h
 /lib/hdb/test_dbinfo
@@ -367,7 +365,6 @@ asn1_*.[cx]
 /lib/roken/base64-test
 /lib/roken/getaddrinfo-test
 /lib/roken/getifaddrs-test
-/lib/roken/getxxyyy-test
 /lib/roken/glob.h
 /lib/roken/hex-test
 /lib/roken/make-roken
@@ -381,6 +378,8 @@ asn1_*.[cx]
 /lib/roken/snprintf-test
 /lib/roken/snprintf-test.trs
 /lib/roken/strpftime-test
+/lib/roken/test-auxval
+/lib/roken/test-detach
 /lib/roken/test-readenv
 /lib/roken/tsearch-test
 /lib/roken/vis.h

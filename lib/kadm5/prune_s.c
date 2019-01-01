@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 1995, 1996, 1997 Kungliga Tekniska Högskolan
- * (Royal Institute of Technology, Stockholm, Sweden).
+ * Copyright (c) 2018 Cesnet z.s.p.o.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,29 +30,55 @@
  * SUCH DAMAGE.
  */
 
-#include <config.h>
+#include "kadm5_locl.h"
 
-#include <stdio.h>
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
-#ifdef HAVE_CRYPT_H
-#include <crypt.h>
-#endif
-#include "roken.h"
+RCSID("$Id$");
 
-ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
-unix_verify_user(char *user, char *password)
+kadm5_ret_t
+kadm5_s_prune_principal(void *server_handle,
+                        krb5_principal princ,
+                        int kvno)
 {
-    struct passwd *pw;
+    kadm5_server_context *context = server_handle;
+    hdb_entry_ex ent;
+    kadm5_ret_t ret;
 
-    pw = k_getpwnam(user);
-    if(pw == NULL)
-	return -1;
-    if(strlen(pw->pw_passwd) == 0 && strlen(password) == 0)
-	return 0;
-    if(strcmp(crypt(password, pw->pw_passwd), pw->pw_passwd) == 0)
-        return 0;
-    return -1;
+    memset(&ent, 0, sizeof(ent));
+    if (!context->keep_open) {
+        ret = context->db->hdb_open(context->context, context->db, O_RDWR, 0);
+        if(ret)
+            return ret;
+    }
+
+    ret = kadm5_log_init(context);
+    if (ret)
+        goto out;
+
+    ret = context->db->hdb_fetch_kvno(context->context, context->db, princ,
+                                      HDB_F_GET_ANY|HDB_F_ADMIN_DATA, 0, &ent);
+    if (ret)
+        goto out2;
+
+    ret = hdb_prune_keys_kvno(context->context, &ent.entry, kvno);
+    if (ret)
+        goto out3;
+
+    ret = hdb_seal_keys(context->context, context->db, &ent.entry);
+    if (ret)
+        goto out3;
+
+    ret = kadm5_log_modify(context, &ent.entry, KADM5_KEY_DATA);
+
+out3:
+    hdb_free_entry(context->context, &ent);
+out2:
+    (void) kadm5_log_end(context);
+out:
+    if (!context->keep_open) {
+        kadm5_ret_t ret2;
+        ret2 = context->db->hdb_close(context->context, context->db);
+        if (ret == 0 && ret2 != 0)
+            ret = ret2;
+    }
+    return _kadm5_error_code(ret);
 }
-

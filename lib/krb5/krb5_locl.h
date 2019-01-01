@@ -142,6 +142,7 @@ struct _krb5_krb_auth_data;
 
 #include <krb5.h>
 #include <krb5_err.h>
+#include <k5e1_err.h>
 #include <asn1_err.h>
 #ifdef PKINIT
 #include <hx509.h>
@@ -170,6 +171,9 @@ struct _krb5_krb_auth_data;
 #define KEYTAB_DEFAULT "FILE:" SYSCONFDIR "/krb5.keytab"
 #define KEYTAB_DEFAULT_MODIFY "FILE:" SYSCONFDIR "/krb5.keytab"
 
+#ifndef CLIENT_KEYTAB_DEFAULT
+#define CLIENT_KEYTAB_DEFAULT	"FILE:" LOCALSTATEDIR "/user/%{euid}/client.keytab";
+#endif
 
 #define MODULI_FILE SYSCONFDIR "/krb5.moduli"
 

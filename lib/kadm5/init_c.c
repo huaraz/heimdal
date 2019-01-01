@@ -72,6 +72,7 @@ set_funcs(kadm5_client_context *c)
     SET(c, get_principals);
     SET(c, get_privs);
     SET(c, modify_principal);
+    SET(c, prune_principal);
     SET(c, randkey_principal);
     SET(c, rename_principal);
     SET(c, lock);
@@ -89,7 +90,7 @@ _kadm5_c_init_context(kadm5_client_context **ctx,
 
     *ctx = malloc(sizeof(**ctx));
     if(*ctx == NULL)
-	return ENOMEM;
+	return krb5_enomem(context);
     memset(*ctx, 0, sizeof(**ctx));
     krb5_add_et_list (context, initialize_kadm5_error_table_r);
     set_funcs(*ctx);
@@ -98,7 +99,7 @@ _kadm5_c_init_context(kadm5_client_context **ctx,
 	ret = 0;
 	(*ctx)->realm = strdup(params->realm);
 	if ((*ctx)->realm == NULL)
-	    ret = ENOMEM;
+	    ret = krb5_enomem(context);
     } else
 	ret = krb5_get_default_realm((*ctx)->context, &(*ctx)->realm);
     if (ret) {
@@ -123,7 +124,7 @@ _kadm5_c_init_context(kadm5_client_context **ctx,
     if ((*ctx)->admin_server == NULL) {
 	free((*ctx)->realm);
 	free(*ctx);
-	return ENOMEM;
+	return krb5_enomem(context);
     }
     colon = strchr ((*ctx)->admin_server, ':');
     if (colon != NULL)
@@ -368,10 +369,10 @@ _kadm5_c_get_cred_cache(krb5_context context,
 	     * No client was specified by the caller and we cannot
 	     * determine the client from a credentials cache.
 	     */
+            char userbuf[128];
 	    const char *user;
 
-	    user = get_default_username ();
-
+	    user = roken_get_username(userbuf, sizeof(userbuf));
 	    if(user == NULL) {
 		krb5_set_error_message(context, KADM5_FAILURE, "Unable to find local user name");
 		return KADM5_FAILURE;
@@ -489,8 +490,7 @@ kadm_connect(kadm5_client_context *ctx)
     if (error == -1 || service_name == NULL) {
 	freeaddrinfo (ai);
 	rk_closesocket(s);
-	krb5_clear_error_message(context);
-	return ENOMEM;
+	return krb5_enomem(context);
     }
 
     ret = krb5_parse_name(context, service_name, &server);

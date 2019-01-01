@@ -43,7 +43,7 @@ kadmind_dispatch(void *kadm_handlep, krb5_boolean initial,
 		 krb5_data *in, krb5_data *out)
 {
     kadm5_ret_t ret;
-    int32_t cmd, mask, tmp;
+    int32_t cmd, mask, kvno, tmp;
     kadm5_server_context *contextp = kadm_handlep;
     char client[128], name[128], name2[128];
     const char *op = "";
@@ -249,6 +249,36 @@ kadmind_dispatch(void *kadm_handlep, krb5_boolean initial,
 	krb5_store_int32(sp, ret);
 	break;
     }
+    case kadm_prune:{
+        op = "PRUNE";
+        ret = krb5_ret_principal(sp, &princ);
+        if (ret)
+            goto fail;
+        ret = krb5_ret_int32(sp, &kvno);
+        if (ret == HEIM_ERR_EOF) {
+            kvno = 0;
+        } else if (ret) {
+            krb5_free_principal(contextp->context, princ);
+            goto fail;
+        }
+        krb5_unparse_name_fixed(contextp->context, princ, name, sizeof(name));
+        krb5_warnx(contextp->context, "%s: %s %s", client, op, name);
+        ret = _kadm5_acl_check_permission(contextp, KADM5_PRIV_CPW, princ);
+        if (ret) {
+            krb5_free_principal(contextp->context, princ);
+            goto fail;
+        }
+        ret = kadm5_prune_principal(kadm_handlep, princ, kvno);
+        krb5_free_principal(contextp->context, princ);
+        krb5_storage_free(sp);
+        sp = krb5_storage_emem();
+        if (sp == NULL) {
+            ret = ENOMEM;
+            goto fail;
+        }
+        krb5_store_int32(sp, ret);
+        break;
+    }
     case kadm_rename:{
 	op = "RENAME";
 	ret = krb5_ret_principal(sp, &princ);
@@ -296,6 +326,8 @@ kadmind_dispatch(void *kadm_handlep, krb5_boolean initial,
 	break;
     }
     case kadm_chpass:{
+	krb5_boolean is_self_cpw, allow_self_cpw;
+
 	op = "CHPASS";
 	ret = krb5_ret_principal(sp, &princ);
 	if (ret)
@@ -314,40 +346,23 @@ kadmind_dispatch(void *kadm_handlep, krb5_boolean initial,
 	krb5_warnx(contextp->context, "%s: %s %s", client, op, name);
 
 	/*
-	 * The change is allowed if at least one of:
-	 *
-	 * a) allowed by sysadmin
-	 * b) it's for the principal him/herself and this was an
-	 *    initial ticket, but then, check with the password quality
-	 *    function.
-	 * c) the user is on the CPW ACL.
+	 * Change password requests are subject to ACLs unless the principal is
+	 * changing their own password and the initial ticket flag is set, and
+	 * the allow_self_change_password configuration option is TRUE.
 	 */
-
-	if (krb5_config_get_bool_default(contextp->context, NULL, TRUE,
-					 "kadmin", "allow_self_change_password", NULL)
-	    && initial
-	    && krb5_principal_compare (contextp->context, contextp->caller,
-				       princ))
-	{
-	    krb5_data pwd_data;
-	    const char *pwd_reason;
-
-	    pwd_data.data = password;
-	    pwd_data.length = strlen(password);
-
-	    pwd_reason = kadm5_check_password_quality (contextp->context,
-						       princ, &pwd_data);
-	    if (pwd_reason != NULL)
-		ret = KADM5_PASS_Q_DICT;
-	    else
-		ret = 0;
-	} else
+	is_self_cpw =
+	    krb5_principal_compare(contextp->context, contextp->caller, princ);
+	allow_self_cpw =
+	    krb5_config_get_bool_default(contextp->context, NULL, TRUE,
+					 "kadmin", "allow_self_change_password", NULL);
+	if (!(is_self_cpw && initial && allow_self_cpw)) {
 	    ret = _kadm5_acl_check_permission(contextp, KADM5_PRIV_CPW, princ);
-
-	if(ret) {
-	    krb5_free_principal(contextp->context, princ);
-	    goto fail;
+	    if (ret) {
+		krb5_free_principal(contextp->context, princ);
+		goto fail;
+	    }
 	}
+
 	ret = kadm5_chpass_principal_3(kadm_handlep, princ, keepold, 0, NULL,
 				       password);
 	krb5_free_principal(contextp->context, princ);
@@ -843,3 +858,4 @@ kadmind_loop(krb5_context contextp,
 
     return 0;
 }
+

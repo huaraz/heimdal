@@ -1,7 +1,9 @@
 /*
- * Copyright (c) 2007 Kungliga Tekniska Högskolan
+ * Copyright (c) 2010-2018 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
+ *
+ * Portions Copyright (c) 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,21 +33,22 @@
  * SUCH DAMAGE.
  */
 
-/* $Id$ */
+#include "netlogon.h"
 
-#ifndef __SU_PATH_H
-#define __SU_PATH_H
+OM_uint32
+_netlogon_duplicate_cred(OM_uint32 *minor_status,
+                         gss_const_cred_id_t input_cred_handle,
+                         gss_cred_id_t *output_cred_handle)
+{
+    gssnetlogon_const_cred src = (gssnetlogon_const_cred)input_cred_handle;
+    gssnetlogon_cred dst;
 
-#ifndef _PATH_DEFPATH
-#define _PATH_DEFPATH "/usr/bin:/bin"
-#endif
+    dst = calloc(1, sizeof(*dst));
+    if (dst == NULL) {
+        *minor_status = ENOMEM;
+        return GSS_S_FAILURE;
+    }
 
-#ifndef _PATH_BSHELL
-#define _PATH_BSHELL "/bin/sh"
-#endif
-
-#ifndef _PATH_ETC_ENVIRONMENT
-#define _PATH_ETC_ENVIRONMENT SYSCONFDIR "/environment"
-#endif
-
-#endif /* __SU_PATH_H */
+    *dst = *src;
+    return _netlogon_duplicate_name(minor_status, (gss_name_t)&src->Name, &dst->Name)
+}

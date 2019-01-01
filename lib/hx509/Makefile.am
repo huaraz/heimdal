@@ -164,7 +164,7 @@ hxtool-commands.c hxtool-commands.h: hxtool-commands.in $(SLC)
 dist_hxtool_SOURCES = hxtool.c
 nodist_hxtool_SOURCES = hxtool-commands.c hxtool-commands.h
 
-$(hxtool_OBJECTS): hxtool-commands.h hx509_err.h
+$(hxtool_OBJECTS): hxtool-commands.h $(nodist_include_HEADERS)
 
 hxtool_LDADD = \
 	libhx509.la \
@@ -392,7 +392,8 @@ EXTRA_DIST = \
 	data/ocsp-resp2.der \
 	data/ocsp-responder.crt \
 	data/ocsp-responder.key \
-	data/openssl.cnf \
+	data/openssl.1.0.cnf \
+	data/openssl.1.1.cnf \
 	data/pkinit-proxy-chain.crt \
 	data/pkinit-proxy.crt \
 	data/pkinit-proxy.key \

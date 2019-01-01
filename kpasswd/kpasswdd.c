@@ -40,6 +40,7 @@ RCSID("$Id$");
 #endif
 #include <hdb.h>
 #include <kadm5/private.h>
+#include <kadm5/kadm5_err.h>
 
 static krb5_context context;
 static krb5_log_facility *log_facility;
@@ -246,7 +247,6 @@ change (krb5_auth_context auth_context,
 {
     krb5_error_code ret;
     char *client = NULL, *admin = NULL;
-    const char *pwd_reason;
     kadm5_config_params conf;
     void *kadm5_handle = NULL;
     krb5_principal principal = NULL;
@@ -366,25 +366,8 @@ change (krb5_auth_context auth_context,
 	goto out;
     }
 
-    /*
-     * Check password quality if not changing as administrator
-     */
-
-    if (krb5_principal_compare(context, admin_principal, principal) == TRUE) {
-
-	pwd_reason = kadm5_check_password_quality (context, principal,
-						   pwd_data);
-	if (pwd_reason != NULL ) {
-	    krb5_warnx (context,
-			"%s didn't pass password quality check with error: %s",
-			client, pwd_reason);
-	    reply_priv (auth_context, s, sa, sa_size,
-			KRB5_KPASSWD_SOFTERROR, pwd_reason);
-	    goto out;
-	}
-	krb5_warnx (context, "Changing password for %s", client);
-    } else {
-	ret = _kadm5_acl_check_permission(kadm5_handle, KADM5_PRIV_CPW,
+    if (krb5_principal_compare(context, admin_principal, principal) == FALSE) {
+ 	ret = _kadm5_acl_check_permission(kadm5_handle, KADM5_PRIV_CPW,
 					  principal);
 	if (ret) {
 	    krb5_warn (context, ret,
@@ -395,6 +378,8 @@ change (krb5_auth_context auth_context,
 	    goto out;
 	}
 	krb5_warnx (context, "%s is changing password for %s", admin, client);
+    } else {
+	krb5_warnx (context, "Changing password for %s", client);
     }
 
     ret = krb5_data_realloc(pwd_data, pwd_data->length + 1);
@@ -412,7 +397,14 @@ change (krb5_auth_context auth_context,
     pwd_data = NULL;
     if (ret) {
 	const char *str = krb5_get_error_message(context, ret);
-	krb5_warnx(context, "kadm5_s_chpass_principal_cond: %s", str);
+
+	if (ret == KADM5_PASS_Q_DICT) {
+	    krb5_warnx(context,
+		       "%s didn't pass password quality check with error: %s",
+		       client, str);
+	} else {
+	    krb5_warnx(context, "kadm5_s_chpass_principal_cond: %s", str);
+	}
 	reply_priv (auth_context, s, sa, sa_size, KRB5_KPASSWD_SOFTERROR,
 		    str ? str : "Internal error");
 	krb5_free_error_message(context, str);

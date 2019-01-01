@@ -35,6 +35,34 @@
 
 RCSID("$Id$");
 
+static kadm5_ret_t
+rename_principal_hook(kadm5_server_context *context,
+		      enum kadm5_hook_stage stage,
+		      krb5_error_code code,
+		      krb5_const_principal source,
+		      krb5_const_principal target)
+{
+    krb5_error_code ret = 0;
+    size_t i;
+
+    for (i = 0; i < context->num_hooks; i++) {
+	kadm5_hook_context *hook = context->hooks[i];
+
+	if (hook->hook->rename != NULL) {
+	    ret = hook->hook->rename(context->context, hook->data,
+				     stage, code, source, target);
+	    if (ret != 0) {
+		_kadm5_s_set_hook_error_message(context, ret, "rename",
+						hook->hook, stage);
+		if (stage == KADM5_HOOK_STAGE_PRECOMMIT)
+		    break;
+	    }
+	}
+    }
+
+    return ret;
+}
+
 kadm5_ret_t
 kadm5_s_rename_principal(void *server_handle,
 			 krb5_principal source,
@@ -44,6 +72,7 @@ kadm5_s_rename_principal(void *server_handle,
     kadm5_ret_t ret;
     hdb_entry_ex ent;
     krb5_principal oldname;
+    size_t i;
 
     memset(&ent, 0, sizeof(ent));
     if (krb5_principal_compare(context->context, source, target))
@@ -63,12 +92,17 @@ kadm5_s_rename_principal(void *server_handle,
     if (ret)
 	goto out2;
     oldname = ent.entry.principal;
+
+    ret = rename_principal_hook(context, KADM5_HOOK_STAGE_PRECOMMIT,
+				0, source, target);
+    if (ret)
+	goto out3;
+
     ret = _kadm5_set_modifier(context, &ent.entry);
     if (ret)
 	goto out3;
     {
 	/* fix salt */
-	size_t i;
 	Salt salt;
 	krb5_salt salt2;
 	memset(&salt, 0, sizeof(salt));
@@ -80,7 +114,7 @@ kadm5_s_rename_principal(void *server_handle,
 		ent.entry.keys.val[i].salt =
 		    malloc(sizeof(*ent.entry.keys.val[i].salt));
 		if (ent.entry.keys.val[i].salt == NULL)
-		    ret = ENOMEM;
+		    ret = krb5_enomem(context->context);
                 else
                     ret = copy_Salt(&salt, ent.entry.keys.val[i].salt);
 		if (ret)
@@ -100,6 +134,9 @@ kadm5_s_rename_principal(void *server_handle,
 
     /* This logs the change for iprop and writes to the HDB */
     ret = kadm5_log_rename(context, source, &ent.entry);
+
+    (void) rename_principal_hook(context, KADM5_HOOK_STAGE_POSTCOMMIT,
+				 ret, source, target);
 
  out3:
     ent.entry.principal = oldname; /* Unborrow target */

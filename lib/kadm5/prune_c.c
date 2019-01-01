@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 1995, 1996, 1997, 1998, 1999 Kungliga Tekniska Högskolan
- * (Royal Institute of Technology, Stockholm, Sweden).
+ * Copyright (c) 2018 Cesnet z.s.p.o.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,31 +30,44 @@
  * SUCH DAMAGE.
  */
 
-#include <config.h>
+#include "kadm5_locl.h"
 
-#include "roken.h"
-#ifdef HAVE_SHADOW_H
-#include <shadow.h>
-#endif
+RCSID("$Id$");
 
-ROKEN_LIB_FUNCTION struct passwd * ROKEN_LIB_CALL
-k_getpwnam (const char *user)
+kadm5_ret_t
+kadm5_c_prune_principal(void *server_handle, krb5_principal princ, int kvno)
 {
-     struct passwd *p;
+    kadm5_client_context *context = server_handle;
+    kadm5_ret_t ret, ret2;
+    krb5_storage *sp = NULL;
+    unsigned char buf[1024];
+    krb5_data reply;
 
-     p = getpwnam (user);
-#if defined(HAVE_GETSPNAM) && defined(HAVE_STRUCT_SPWD)
-     if(p)
-     {
-	  struct spwd *spwd;
-
-	  spwd = getspnam (user);
-	  if (spwd)
-	       p->pw_passwd = spwd->sp_pwdp;
-	  endspent ();
-     }
-#else
-     endpwent ();
-#endif
-     return p;
+    krb5_data_zero(&reply);
+    ret = _kadm5_connect(server_handle);
+    if (ret == 0 && (sp = krb5_storage_from_mem(buf, sizeof(buf))) == NULL)
+        ret = krb5_enomem(context->context);
+    if (ret == 0)
+        ret = krb5_store_int32(sp, kadm_prune);
+    if (ret == 0)
+        ret = krb5_store_principal(sp, princ);
+    if (ret == 0)
+        ret = krb5_store_int32(sp, kvno);
+    if (ret == 0)
+        ret = _kadm5_client_send(context, sp);
+    if (ret == 0)
+        ret = _kadm5_client_recv(context, &reply);
+    krb5_storage_free(sp);
+    sp = NULL;
+    if (ret == 0 && (sp = krb5_storage_from_data(&reply)) == NULL)
+        ret = krb5_enomem(context->context);
+    if (ret == 0)
+        ret = krb5_ret_int32(sp, &ret2);
+    if (ret == 0) {
+        krb5_clear_error_message(context->context);
+        ret = ret2;
+    }
+    krb5_data_free(&reply);
+    krb5_storage_free(sp);
+    return ret;
 }

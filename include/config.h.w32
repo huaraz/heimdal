@@ -427,6 +427,9 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 /* Define to 1 if you have the `getlogin' function. */
 /* #define HAVE_GETLOGIN 1 */
 
+/* Define to 1 if you have the `getlogin_r' function. */
+/* #define HAVE_GETLOGIN_R 1 */
+
 /* Define if you have a working getmsg. */
 /* #undef HAVE_GETMSG */
 
@@ -451,6 +454,9 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 /* Define to 1 if you have the `getpwnam_r' function. */
 /* #define HAVE_GETPWNAM_R 1 */
 
+/* Define to 1 if you have the `getpwuid_r' function. */
+/* #define HAVE_GETPWUID_R 1 */
+
 /* Define to 1 if you have the `getrlimit' function. */
 /* #define HAVE_GETRLIMIT 1 */
 
@@ -471,10 +477,6 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 
 /* Define if you have the function `getusershell'. */
 /* #define HAVE_GETUSERSHELL 1 */
-
-/* define if you have a glob() that groks GLOB_BRACE, GLOB_NOCHECK,
-   GLOB_QUOTE, GLOB_TILDE, and GLOB_LIMIT */
-/* #define HAVE_GLOB 1 */
 
 /* Define to 1 if you have the `grantpt' function. */
 /* #define HAVE_GRANTPT 1 */
@@ -549,9 +551,6 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 
 /* Define if you have IPv6. */
 #define HAVE_IPV6 1
-
-/* Define if you have the function `iruserok'. */
-/* #define HAVE_IRUSEROK 1 */
 
 /* Define to 1 if you have the `issetugid' function. */
 /* #undef HAVE_ISSETUGID */
@@ -639,12 +638,6 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 
 /* Define to 1 if you have the <netinet/tcp.h> header file. */
 /* #define HAVE_NETINET_TCP_H 1 */
-
-/* Define if you want to use Netinfo instead of krb5.conf. */
-/* #undef HAVE_NETINFO */
-
-/* Define to 1 if you have the <netinfo/ni.h> header file. */
-/* #undef HAVE_NETINFO_NI_H */
 
 /* Define to 1 if you have the <net/if.h> header file. */
 /* #define HAVE_NET_IF_H 1 */
@@ -1267,9 +1260,6 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 /* define if the system is missing a prototype for inet_aton() */
 /* #undef NEED_INET_ATON_PROTO */
 
-/* define if the system is missing a prototype for iruserok() */
-/* #undef NEED_IRUSEROK_PROTO */
-
 /* define if the system is missing a prototype for mkstemp() */
 /* #define NEED_MKSTEMP_PROTO 1 */
 
@@ -1367,8 +1357,14 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 /* Define if getlogin has POSIX flavour (and not BSD). */
 /* #define POSIX_GETLOGIN 1 */
 
+/* Define if getlogin_r has POSIX flavour (and not BSD). */
+/* #define POSIX_GETLOGIN_R 1 */
+
 /* Define if getpwnam_r has POSIX flavour. */
 /* #define POSIX_GETPWNAM_R 1 */
+
+/* Define if getpwnam_r has POSIX flavour. */
+/* #define POSIX_GETPWUID_R 1 */
 
 /* Define if you have the readline package. */
 #define READLINE 1
@@ -1425,6 +1421,13 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 /* Used with login -p */
 /* #undef LOGIN_ARGS */
 
+/* The size of `time_t', as computed by sizeof. */
+#if defined (_USE_64BIT_TIME_T) || !defined( _USE_32BIT_TIME_T)
+#define SIZEOF_TIME_T 8
+#else
+#define SIZEOF_TIME_T 4
+#endif
+
 #ifdef ROKEN_RENAME
 #include "roken_rename.h"
 #endif
@@ -1440,6 +1443,8 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 #define SYSCONFDIR "%{COMMONCONFIG}"
 
 #define LIBDIR "%{LIBDIR}"
+
+#define CLIENT_KEYTAB_DEFAULT "FILE:%{LOCAL_APPDATA}\\Kerberos\\client.keytab"
 
 #endif	/* RC_INVOKED */
 

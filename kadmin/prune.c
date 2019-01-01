@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 1995, 1996, 1997, 1998 Kungliga Tekniska Högskolan
- * (Royal Institute of Technology, Stockholm, Sweden).
+ * Copyright (c) 2018 Cesnet z.s.p.o.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,31 +30,34 @@
  * SUCH DAMAGE.
  */
 
-#include <config.h>
+#include "kadmin_locl.h"
+#include "kadmin-commands.h"
 
-#include "roken.h"
-#ifdef HAVE_SHADOW_H
-#include <shadow.h>
-#endif
-
-ROKEN_LIB_FUNCTION struct passwd * ROKEN_LIB_CALL
-k_getpwuid (uid_t uid)
+int
+prune(struct prune_options *opt, int argc, char **argv)
 {
-     struct passwd *p;
+    krb5_error_code ret = 0;
+    krb5_principal princ_ent = NULL;
 
-     p = getpwuid (uid);
-#if defined(HAVE_GETSPNAM) && defined(HAVE_STRUCT_SPWD)
-     if (p)
-     {
-	  struct spwd *spwd;
+    if (argc == 0) {
+        krb5_warnx(context, "prune: missing principal name argument");
+        return 0;
+    }
+    if (argc > 1) {
+        krb5_warnx(context, "prune: too many arguments");
+        return 0;
+    }
 
-	  spwd = getspnam (p->pw_name);
-	  if (spwd)
-	       p->pw_passwd = spwd->sp_pwdp;
-	  endspent ();
-     }
-#else
-     endpwent ();
-#endif
-     return p;
+    ret = krb5_parse_name(context, argv[0], &princ_ent);
+    if (ret) {
+        krb5_warn(context, ret, "krb5_parse_name %s", argv[0]);
+        goto out2;
+    }
+
+    ret = kadm5_prune_principal(kadm_handle, princ_ent, opt->kvno_integer);
+    if (ret)
+        krb5_warn(context, ret, "kadm5_prune_principal");
+
+out2:
+    return ret != 0;
 }

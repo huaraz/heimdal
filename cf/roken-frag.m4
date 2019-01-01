@@ -182,13 +182,6 @@ rk_RESOLV
 AC_BROKEN_SNPRINTF
 AC_BROKEN_VSNPRINTF
 
-AC_BROKEN_GLOB
-if test "$ac_cv_func_glob_working" != yes; then
-	AC_LIBOBJ(glob)
-fi
-AM_CONDITIONAL(have_glob_h, test "$ac_cv_func_glob_working" = yes)
-
-
 AC_CHECK_FUNCS([				\
 	asnprintf				\
 	asprintf				\
@@ -365,7 +358,6 @@ AC_BROKEN([					\
 	getusershell				\
 	initgroups				\
 	innetgr					\
-	iruserok				\
 	localtime_r				\
 	lstat					\
 	memmove					\
@@ -518,26 +510,6 @@ AC_NEED_PROTO([#include <unistd.h>], gethostname)
 AC_NEED_PROTO([#include <unistd.h>], mkstemp)
 AC_NEED_PROTO([#include <unistd.h>], getusershell)
 AC_NEED_PROTO([#include <unistd.h>], daemon)
-AC_NEED_PROTO([
-#ifdef HAVE_SYS_TYPES_H
-#include <sys/types.h>
-#endif
-#ifdef HAVE_SYS_SOCKET_H
-#include <sys/socket.h>
-#endif
-#ifdef HAVE_NETINET_IN_H
-#include <netinet/in.h>
-#endif
-#ifdef HAVE_ARPA_INET_H
-#include <arpa/inet.h>
-#endif
-#ifdef HAVE_NETDB_H
-#include <netdb.h>
-#endif
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif],
-iruserok)
 
 AC_NEED_PROTO([
 #ifdef HAVE_SYS_TYPES_H

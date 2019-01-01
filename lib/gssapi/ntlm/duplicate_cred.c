@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997 - 1999 Kungliga Tekniska Högskolan
+ * Copyright (c) 2006-2018 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
@@ -31,53 +31,43 @@
  * SUCH DAMAGE.
  */
 
-#include <config.h>
+#include "ntlm.h"
 
-#include "roken.h"
-
-/*
- * Try to return what should be considered the default username or
- * NULL if we can't guess at all.
- */
-
-ROKEN_LIB_FUNCTION const char * ROKEN_LIB_CALL
-get_default_username (void)
+OM_uint32 GSSAPI_CALLCONV
+_gss_ntlm_duplicate_cred(OM_uint32 *minor_status,
+                         gss_const_cred_id_t input_cred_handle,
+                         gss_cred_id_t *output_cred_handle)
 {
-    const char *user;
+    ntlm_const_cred cred = (ntlm_const_cred)input_cred_handle;
+    ntlm_cred new_cred;
+    OM_uint32 junk;
 
-    user = getenv ("USER");
-    if (user == NULL)
-	user = getenv ("LOGNAME");
-    if (user == NULL)
-	user = getenv ("USERNAME");
+    if (input_cred_handle == GSS_C_NO_CREDENTIAL)
+        return _gss_ntlm_acquire_cred(minor_status, GSS_C_NO_NAME,
+                                      GSS_C_INDEFINITE, GSS_C_NO_OID_SET,
+                                      GSS_C_BOTH, output_cred_handle, NULL,
+                                      NULL);
 
-#if defined(HAVE_GETLOGIN) && !defined(POSIX_GETLOGIN)
-    if (user == NULL) {
-	user = (const char *)getlogin ();
-	if (user != NULL)
-	    return user;
+    *output_cred_handle = GSS_C_NO_CREDENTIAL;
+    if ((new_cred = calloc(1, sizeof(*new_cred))) == NULL) {
+        *minor_status = ENOMEM;
+        return GSS_S_FAILURE;
     }
-#endif
-#ifdef HAVE_PWD_H
-    {
-	uid_t uid = getuid ();
-	struct passwd *pwd;
-
-	if (user != NULL) {
-	    pwd = k_getpwnam (user);
-	    if (pwd != NULL && pwd->pw_uid == uid)
-		return user;
-	}
-	pwd = k_getpwuid (uid);
-	if (pwd != NULL)
-	    return pwd->pw_name;
+    
+    new_cred->usage = cred->usage;
+    new_cred->username = strdup(cred->username);
+    new_cred->domain = strdup(cred->domain);
+    new_cred->key.data = malloc(cred->key.length);
+    if (new_cred->username == NULL || new_cred->domain == NULL ||
+        new_cred->key.data == NULL) {
+        *output_cred_handle = (gss_cred_id_t) new_cred;
+        _gss_ntlm_release_cred(&junk, output_cred_handle);
+        *minor_status = ENOMEM;
+        return GSS_S_FAILURE;
     }
-#endif
-#ifdef _WIN32
-    /* TODO: We can call GetUserNameEx() and figure out a
-       username. However, callers do not free the return value of this
-       function. */
-#endif
 
-    return user;
+    memcpy(new_cred->key.data, cred->key.data, cred->key.length);
+    new_cred->key.length = cred->key.length;
+    *output_cred_handle = (gss_cred_id_t) new_cred;
+    return GSS_S_COMPLETE;
 }

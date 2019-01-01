@@ -36,6 +36,38 @@
 RCSID("$Id$");
 
 static kadm5_ret_t
+chpass_principal_hook(kadm5_server_context *context,
+		      enum kadm5_hook_stage stage,
+		      krb5_error_code code,
+		      krb5_const_principal princ,
+		      uint32_t flags,
+		      size_t n_ks_tuple,
+		      krb5_key_salt_tuple *ks_tuple,
+		      const char *password)
+{
+    krb5_error_code ret = 0;
+    size_t i;
+
+    for (i = 0; i < context->num_hooks; i++) {
+	kadm5_hook_context *hook = context->hooks[i];
+
+	if (hook->hook->chpass != NULL) {
+	    ret = hook->hook->chpass(context->context, hook->data,
+				     stage, code, princ, flags,
+				     n_ks_tuple, ks_tuple, password);
+	    if (ret != 0) {
+		_kadm5_s_set_hook_error_message(context, ret, "chpass",
+						hook->hook, stage);
+		if (stage == KADM5_HOOK_STAGE_PRECOMMIT)
+		    break;
+	    }
+	}
+    }
+
+    return ret;
+}
+
+static kadm5_ret_t
 change(void *server_handle,
        krb5_principal princ,
        int keepold,
@@ -50,8 +82,26 @@ change(void *server_handle,
     Key *keys;
     size_t num_keys;
     int existsp = 0;
+    uint32_t hook_flags = 0;
 
     memset(&ent, 0, sizeof(ent));
+
+    if (krb5_principal_compare(context->context, princ, context->caller) ||
+	_kadm5_enforce_pwqual_on_admin_set_p(context)) {
+	krb5_data pwd_data;
+	const char *pwd_reason;
+
+	pwd_data.data = rk_UNCONST(password);
+	pwd_data.length = strlen(password);
+
+	pwd_reason = kadm5_check_password_quality(context->context,
+						  princ, &pwd_data);
+	if (pwd_reason != NULL) {
+	    krb5_set_error_message(context->context, KADM5_PASS_Q_DICT, "%s", pwd_reason);
+	    return KADM5_PASS_Q_DICT;
+	}
+    }
+
     if (!context->keep_open) {
 	ret = context->db->hdb_open(context->context, context->db, O_RDWR, 0);
 	if(ret)
@@ -66,6 +116,16 @@ change(void *server_handle,
 				      HDB_F_DECRYPT|HDB_F_GET_ANY|HDB_F_ADMIN_DATA, 0, &ent);
     if (ret)
 	goto out2;
+
+    if (keepold)
+	hook_flags |= KADM5_HOOK_FLAG_KEEPOLD;
+    if (cond)
+	hook_flags |= KADM5_HOOK_FLAG_CONDITIONAL;
+    ret = chpass_principal_hook(context, KADM5_HOOK_STAGE_PRECOMMIT,
+				0, princ, hook_flags,
+				n_ks_tuple, ks_tuple, password);
+    if (ret)
+	goto out3;
 
     if (keepold || cond) {
 	/*
@@ -148,6 +208,10 @@ change(void *server_handle,
                            KADM5_MOD_NAME | KADM5_MOD_TIME |
                            KADM5_KEY_DATA | KADM5_KVNO |
                            KADM5_PW_EXPIRATION | KADM5_TL_DATA);
+
+    (void) chpass_principal_hook(context, KADM5_HOOK_STAGE_POSTCOMMIT,
+				 ret, princ, hook_flags,
+				 n_ks_tuple, ks_tuple, password);
 
  out3:
     hdb_free_entry(context->context, &ent);
@@ -273,4 +337,19 @@ kadm5_s_chpass_principal_with_key(void *server_handle,
             ret = ret2;
     }
     return _kadm5_error_code(ret);
+}
+
+/*
+ * Returns TRUE if password quality should be checked when passwords are
+ * being set or changed by administrators. This includes principal creation.
+ */
+krb5_boolean
+_kadm5_enforce_pwqual_on_admin_set_p(kadm5_server_context *contextp)
+{
+    if (_kadm5_is_kadmin_service_p(contextp))
+	return FALSE;
+
+    return krb5_config_get_bool_default(contextp->context, NULL, TRUE,
+                                        "password_quality",
+                                        "enforce_on_admin_set", NULL);
 }

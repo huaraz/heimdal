@@ -349,6 +349,7 @@ AC_CHECK_HEADERS([\
 	fnmatch.h				\
 	inttypes.h				\
 	io.h					\
+	keyutils.h				\
 	libutil.h				\
 	limits.h				\
 	maillock.h				\
@@ -456,7 +457,7 @@ AC_FIND_FUNC_NO_LIBS(openpty, util,[
 #endif
 ],[0,0,0,0,0])
 
-AC_FIND_FUNC_NO_LIBS(tgetent, termcap ncurses curses,[
+AC_FIND_FUNC_NO_LIBS(tgetent, termcap ncurses curses tinfo,[
 #ifdef HAVE_TERMCAP_H
 #include <termcap.h>
 #endif
@@ -523,6 +524,7 @@ KRB_CAPABILITIES
 rk_DLADDR
 
 AC_CHECK_GETPWNAM_R_POSIX
+AC_CHECK_GETPWUID_R_POSIX
 
 dnl detect doors on solaris
 if test "$enable_pthread_support" != no; then
@@ -547,7 +549,28 @@ if test "$enable_kcm" = yes; then
 fi
 AM_CONDITIONAL(KCM, test "$enable_kcm" = yes)
 
+dnl detect keyring on Linux
+if test "$ac_cv_header_keyutils_h" = yes; then
+    AC_CHECK_SIZEOF([key_serial_t],,[
+	#ifdef HAVE_INTTYPES_H
+	#include <inttypes.h>
+	#endif
+	#ifdef HAVE_SYS_TYPES_H
+	#include <sys/types.h>
+	#endif
+	#include <keyutils.h>
+    ])
+fi
 
+AC_FIND_FUNC_NO_LIBS(add_key, keyutils)
+if test -n "$LIB_add_key"; then
+    saved_LIBS="$LIBS"
+    LIBS="$LIBS $LIB_add_key"
+    AC_CHECK_FUNCS(keyctl_get_persistent)
+    LIBS="$saved_LIBS"
+fi
+
+AC_CHECK_SIZEOF([time_t])
 
 dnl Cray stuff
 AC_CHECK_FUNCS(getudbnam setlim)
@@ -642,7 +665,6 @@ AC_CONFIG_FILES(Makefile 		\
 	appl/dbutils/Makefile		\
 	appl/gssmask/Makefile		\
 	appl/otp/Makefile		\
-	appl/su/Makefile		\
 	appl/test/Makefile		\
 	appl/kf/Makefile		\
 	appl/dceutils/Makefile		\

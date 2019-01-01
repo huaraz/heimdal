@@ -28,9 +28,9 @@ check_PROGRAMS = 				\
 		base64-test			\
 		getaddrinfo-test		\
 		getifaddrs-test			\
-		getxxyyy-test			\
 		hex-test			\
 		test-auxval			\
+		test-getuserinfo		\
 		test-readenv			\
 		resolve-test			\
 		parse_bytes-test		\
@@ -54,6 +54,8 @@ parse_reply_test_CFLAGS  = -DTEST_RESOLVE
 
 test_readenv_SOURCES = test-readenv.c test-mem.c
 test_auxval_SOURCES = test-auxval.c
+test_getuserinfo_SOURCES = test-getuserinfo.c
+test_getuserinfo_LDADD = libtest.la $(LDADD)
 
 test_detach_SOURCES = test-detach.c
 
@@ -70,9 +72,6 @@ snprintf_test_CFLAGS	= -DTEST_SNPRINTF
 tsearch_test_SOURCES	= tsearch-test.c
 tsearch_test_LDADD = libtest.la $(LDADD)
 tsearch_test_CFLAGS	= -DTEST_TSEARCH
-
-getxxyyy_test_SOURCES	= getxxyyy.c
-getxxyyy_test_CFLAGS	= -DTEST_GETXXYYY
 
 resolve_test_SOURCES = resolve-test.c
 
@@ -92,20 +91,17 @@ libroken_la_SOURCES =		\
 	fseeko.c		\
 	ftello.c		\
 	getaddrinfo_hostspec.c	\
-	get_default_username.c	\
 	get_window_size.c	\
 	getarg.c		\
 	getauxval.c		\
 	getauxval.h		\
 	getnameinfo_verified.c	\
 	getprogname.c		\
-	getxxyyy.c		\
+	getuserinfo.c		\
 	h_errno.c		\
 	hex.c			\
 	hostent_find_fqdn.c	\
 	issuid.c		\
-	k_getpwnam.c		\
-	k_getpwuid.c		\
 	mini_inetd.c		\
 	mkdir.c                 \
 	net_read.c		\
@@ -133,7 +129,6 @@ libroken_la_SOURCES =		\
 	timeval.c		\
 	tm2time.c		\
 	unvis.c			\
-	verify.c		\
 	vis.c			\
 	warnerr.c		\
 	write_pid.c		\
@@ -142,7 +137,6 @@ libroken_la_SOURCES =		\
 
 EXTRA_libroken_la_SOURCES =	\
 	err.hin			\
-	glob.hin		\
 	fnmatch.hin		\
 	ifaddrs.hin		\
 	search.hin		\
@@ -166,12 +160,6 @@ else
 fnmatch_h = fnmatch.h
 endif
 
-if have_glob_h
-glob_h =
-else
-glob_h = glob.h
-endif
-
 if have_ifaddrs_h
 ifaddrs_h =
 else
@@ -191,8 +179,8 @@ vis_h = vis.h
 endif
 
 ## these are controlled by configure
-XHEADERS = $(err_h) $(fnmatch_h) $(glob_h) $(ifaddrs_h) $(search_h) $(vis_h)
-CLEANFILES += err.h fnmatch.h glob.h ifaddrs.h search.h vis.h
+XHEADERS = $(err_h) $(fnmatch_h) $(ifaddrs_h) $(search_h) $(vis_h)
+CLEANFILES += err.h fnmatch.h ifaddrs.h search.h vis.h
 
 dist_include_HEADERS = 				\
 	base64.h				\

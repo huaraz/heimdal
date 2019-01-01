@@ -273,7 +273,7 @@ struct sockaddr_dl;
 #include <dirent.h>
 #endif
 
-#ifdef HAVE_DIRECT_H
+#ifdef WIN32
 #include <direct.h>
 #endif
 
@@ -643,18 +643,7 @@ ROKEN_LIB_FUNCTION char* ROKEN_LIB_CALL getcwd(char *, size_t);
 
 #ifdef HAVE_PWD_H
 #include <pwd.h>
-ROKEN_LIB_FUNCTION struct passwd * ROKEN_LIB_CALL k_getpwnam (const char *);
-ROKEN_LIB_FUNCTION struct passwd * ROKEN_LIB_CALL k_getpwuid (uid_t);
-
-#ifdef POSIX_GETPWNAM_R
-#define rk_getpwnam_r(_n, _pw, _b, _sz, _pwd) getpwnam_r(_n, _pw, _b, _sz, _pwd)
-#else
-ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
-rk_getpwnam_r(const char *, struct passwd *, char *, size_t, struct passwd **);
 #endif
-#endif
-
-ROKEN_LIB_FUNCTION const char * ROKEN_LIB_CALL get_default_username (void);
 
 #ifndef HAVE_SETEUID
 #define seteuid rk_seteuid
@@ -701,7 +690,7 @@ ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL rk_rename(const char *, const char *);
 #define rk_rename(__rk_rn_from,__rk_rn_to) rename(__rk_rn_from,__rk_rn_to)
 #endif
 
-#ifdef MKDIR_DOES_NOT_HAVE_MODE
+#ifdef WIN32
 #define mkdir rk_mkdir
 #else
 #define rk_mkdir(__rk_rn_name, __rk_rn_mode) mkdir(__rk_rn_name,__rk_rn_mode)
@@ -733,12 +722,6 @@ ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
 #endif
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL innetgr(const char*, const char*,
     const char*, const char*);
-#endif
-
-#ifndef HAVE_IRUSEROK
-#define iruserok rk_iruserok
-ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL iruserok(unsigned, int,
-    const char *, const char *);
 #endif
 
 #if !defined(HAVE_GETHOSTNAME) || defined(NEED_GETHOSTNAME_PROTO)
@@ -812,8 +795,6 @@ int rk_flock(int fd, int operation);
 #endif
 
 ROKEN_LIB_FUNCTION time_t ROKEN_LIB_CALL tm2time (struct tm, int);
-
-ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL unix_verify_user(char *, char *);
 
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL roken_concat (char *, size_t, ...);
 
@@ -1016,6 +997,15 @@ ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
 roken_getaddrinfo_hostspec(const char *, int, struct addrinfo **);
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
 roken_getaddrinfo_hostspec2(const char *, int, int, struct addrinfo **);
+
+ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL
+roken_get_homedir(char *, size_t);
+ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL
+roken_get_appdatadir(char *, size_t);
+ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL
+roken_get_username(char *, size_t);
+ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL
+roken_get_shell(char *, size_t);
 
 #ifndef HAVE_STRFTIME
 #define strftime rk_strftime
