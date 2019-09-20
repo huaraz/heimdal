@@ -526,27 +526,75 @@ noreferral:
     return 0;
 }
 
+/*
+ * Verify KDC supported anonymous if requested
+ */
+static krb5_error_code
+check_client_anonymous(krb5_context context,
+		       krb5_kdc_rep *rep,
+		       krb5_const_principal requested,
+		       krb5_const_principal mapped,
+		       krb5_boolean is_tgs_rep)
+{
+    int flags;
+
+    if (!rep->enc_part.flags.anonymous)
+	return KRB5KDC_ERR_BADOPTION;
+
+    /*
+     * Here we must validate that the AS returned a ticket of the expected type
+     * for either a fully anonymous request, or authenticated request for an
+     * anonymous ticket.  If this is a TGS request, we're done.  Then if the
+     * 'requested' principal was anonymous, we'll check the 'mapped' principal
+     * accordingly (without enforcing the name type and perhaps the realm).
+     * Finally, if the 'requested' principal was not anonymous, well check
+     * that the 'mapped' principal has an anonymous name and type, in a
+     * non-anonymous realm.  (Should we also be checking for a realm match
+     * between the request and the mapped name in this case?)
+     */
+    if (is_tgs_rep)
+	flags = KRB5_ANON_MATCH_ANY_NONT;
+    else if (krb5_principal_is_anonymous(context, requested,
+                                         KRB5_ANON_MATCH_ANY_NONT))
+	flags = KRB5_ANON_MATCH_UNAUTHENTICATED | KRB5_ANON_IGNORE_NAME_TYPE;
+    else
+	flags = KRB5_ANON_MATCH_AUTHENTICATED;
+
+    if (!krb5_principal_is_anonymous(context, mapped, flags))
+	return KRB5KRB_AP_ERR_MODIFIED;
+
+    return 0;
+}
 
 /*
- * Verify referral data
+ * Verify returned client principal name in anonymous/referral case
  */
 
-
 static krb5_error_code
-check_client_referral(krb5_context context,
+check_client_mismatch(krb5_context context,
 		      krb5_kdc_rep *rep,
 		      krb5_const_principal requested,
 		      krb5_const_principal mapped,
 		      krb5_keyblock const * key)
 {
-    if (krb5_principal_compare(context, requested, mapped) == FALSE &&
-	!rep->enc_part.flags.enc_pa_rep)
-    {
-	krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED,
-			       N_("Not same client principal returned "
-				  "as requested", ""));
-	return KRB5KRB_AP_ERR_MODIFIED;
+    if (rep->enc_part.flags.anonymous) {
+	if (!krb5_principal_is_anonymous(context, mapped,
+                                         KRB5_ANON_MATCH_ANY_NONT)) {
+	    krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED,
+				   N_("Anonymous ticket does not contain anonymous "
+				      "principal", ""));
+	    return KRB5KRB_AP_ERR_MODIFIED;
+	}
+    } else {
+	if (krb5_principal_compare(context, requested, mapped) == FALSE &&
+	    !rep->enc_part.flags.enc_pa_rep) {
+	    krb5_set_error_message(context, KRB5KRB_AP_ERR_MODIFIED,
+				   N_("Not same client principal returned "
+				   "as requested", ""));
+	    return KRB5KRB_AP_ERR_MODIFIED;
+	}
     }
+
     return 0;
 }
 
@@ -687,10 +735,21 @@ _krb5_extract_ticket(krb5_context context,
     if (ret)
 	goto out;
 
+    /* check KDC supported anonymous if it was requested */
+    if (flags & EXTRACT_TICKET_MATCH_ANON) {
+	ret = check_client_anonymous(context,rep,
+				     creds->client,
+				     tmp_principal,
+				     request == NULL); /* is TGS */
+	if (ret) {
+	    krb5_free_principal(context, tmp_principal);
+	    goto out;
+	}
+    }
+
     /* check client referral and save principal */
-    /* anonymous here ? */
     if((flags & EXTRACT_TICKET_ALLOW_CNAME_MISMATCH) == 0) {
-	ret = check_client_referral(context, rep,
+	ret = check_client_mismatch(context, rep,
 				    creds->client,
 				    tmp_principal,
 				    &creds->session);

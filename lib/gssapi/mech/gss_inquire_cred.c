@@ -73,12 +73,11 @@ gss_inquire_cred(OM_uint32 *minor_status,
 		*mechanisms = GSS_C_NO_OID_SET;
 
 	if (name_ret) {
-		name = calloc(1, sizeof(*name));
+		name = _gss_create_name(NULL, NULL);
 		if (name == NULL) {
 			*minor_status = ENOMEM;
 			return (GSS_S_FAILURE);
 		}
-		HEIM_SLIST_INIT(&name->gn_mn);
 	} else {
 		name = NULL;
 	}
@@ -99,6 +98,9 @@ gss_inquire_cred(OM_uint32 *minor_status,
 		HEIM_SLIST_FOREACH(mc, &cred->gc_mc, gmc_link) {
 			gss_name_t mc_name;
 			OM_uint32 mc_lifetime;
+
+			if (mc->gmc_mech->gm_inquire_cred == NULL)
+				continue;
 
 			major_status = mc->gmc_mech->gm_inquire_cred(minor_status,
 			    mc->gmc_cred, &mc_name, &mc_lifetime, &usage, NULL);
@@ -135,6 +137,9 @@ gss_inquire_cred(OM_uint32 *minor_status,
 			gss_name_t mc_name;
 			OM_uint32 mc_lifetime;
 
+			if (m->gm_mech.gm_inquire_cred == NULL)
+				continue;
+
 			major_status = m->gm_mech.gm_inquire_cred(minor_status,
 			    GSS_C_NO_CREDENTIAL, &mc_name, &mc_lifetime,
 			    &usage, NULL);
@@ -169,12 +174,15 @@ gss_inquire_cred(OM_uint32 *minor_status,
 		}
 	}
 
-	if (found == 0) {
+	if (found == 0 || min_lifetime == 0) {
 		gss_name_t n = (gss_name_t)name;
 		if (n)
 			gss_release_name(minor_status, &n);
 		gss_release_oid_set(minor_status, mechanisms);
 		*minor_status = 0;
+		if (min_lifetime == 0)
+			return (GSS_S_CREDENTIALS_EXPIRED);
+
 		return (GSS_S_NO_CRED);
 	}
 

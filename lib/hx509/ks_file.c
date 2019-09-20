@@ -528,7 +528,7 @@ struct store_ctx {
     outformat format;
 };
 
-static int
+static int HX509_LIB_CALL
 store_func(hx509_context context, void *ctx, hx509_cert c)
 {
     struct store_ctx *sc = ctx;
@@ -688,7 +688,7 @@ static struct hx509_keyset_ops keyset_derfile = {
 };
 
 
-void
+HX509_LIB_FUNCTION void HX509_LIB_CALL
 _hx509_ks_file_register(hx509_context context)
 {
     _hx509_ks_register(context, &keyset_file);

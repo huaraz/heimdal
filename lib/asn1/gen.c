@@ -288,15 +288,16 @@ close_generate (void)
 {
     fprintf (headerfile, "#endif /* __%s_h__ */\n", headerbase);
 
-    if (headerfile)
-        fclose (headerfile);
-    if (privheaderfile)
-        fclose (privheaderfile);
-    if (templatefile)
-        fclose (templatefile);
+    if (headerfile && fclose(headerfile) == EOF)
+        err(1, "writes to public header file failed");
+    if (privheaderfile && fclose(privheaderfile) == EOF)
+        err(1, "writes to private header file failed");
+    if (templatefile && fclose(templatefile) == EOF)
+        err(1, "writes to template file failed");
     if (logfile) {
-        fprintf (logfile, "\n");
-        fclose (logfile);
+        fprintf(logfile, "\n");
+        if (fclose(logfile) == EOF)
+            err(1, "writes to log file failed");
     }
 }
 
@@ -388,6 +389,9 @@ generate_header_of_codefile(const char *name)
 	fprintf (codefile,
 		 "#include <parse_units.h>\n\n");
 
+#ifdef _WIN32
+    fprintf(codefile, "#pragma warning(disable: 4101)\n\n");
+#endif
 }
 
 void
@@ -396,7 +400,8 @@ close_codefile(void)
     if (codefile == NULL)
 	abort();
 
-    fclose(codefile);
+    if (fclose(codefile) == EOF)
+        err(1, "writes to source code file failed");
     codefile = NULL;
 }
 
@@ -760,6 +765,27 @@ define_type (int level, const char *name, const char *basename, Type *t, int typ
 	Member *m;
 	Type i;
 	struct range range = { 0, UINT_MAX };
+        size_t max_memno = 0;
+        size_t bitset_size;
+
+        /*
+         * range.max implies the size of the base unsigned integer used for the
+         * bitfield members.  If it's less than or equal to UINT_MAX, then that
+         * will be unsigned int, otherwise it will be uint64_t.
+         *
+         * We could just use uint64_t, yes, but for now, and in case that any
+         * projects were exposing the BIT STRING types' C representations in
+         * ABIs prior to this compiler supporting BIT STRING with larger
+         * members, we stick to this.
+         */
+        ASN1_TAILQ_FOREACH(m, t->members, members) {
+            if (m->val > max_memno)
+                max_memno = m->val;
+        }
+        if (max_memno > 63)
+            range.max = INT64_MAX;
+        else
+            range.max = 1LU << max_memno;
 
 	i.type = TInteger;
 	i.range = &range;
@@ -777,10 +803,13 @@ define_type (int level, const char *name, const char *basename, Type *t, int typ
 	    ASN1_TAILQ_FOREACH(m, t->members, members) {
 		char *n = NULL;
 
-		/* pad unused */
+		/*
+                 * pad unused bits beween declared members (hopefully this
+                 * forces the compiler to give us an obvious layout)
+                 */
 		while (pos < m->val) {
 		    if (asprintf (&n, "_unused%d:1", pos) < 0 || n == NULL)
-			errx(1, "malloc");
+			err(1, "malloc");
 		    define_type (level + 1, n, newbasename, &i, FALSE, FALSE);
 		    free(n);
 		    pos++;
@@ -794,8 +823,13 @@ define_type (int level, const char *name, const char *basename, Type *t, int typ
 		n = NULL;
 		pos++;
 	    }
-	    /* pad to 32 elements */
-	    while (pos < 32) {
+	    /* pad unused tail (ditto) */
+            bitset_size = max_memno;
+            if (max_memno > 31)
+                bitset_size += 64 - (max_memno % 64);
+            else
+                bitset_size = 32;
+	    while (pos < bitset_size) {
 		char *n = NULL;
 		if (asprintf (&n, "_unused%d:1", pos) < 0 || n == NULL)
 		    errx(1, "malloc");

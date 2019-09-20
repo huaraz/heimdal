@@ -164,7 +164,7 @@ _gss_string_to_oid(const char* s, gss_OID *oidp)
 
 #define SYM(name)							\
 do {									\
-	m->gm_mech.gm_ ## name = dlsym(so, "gss_" #name);		\
+	m->gm_mech.gm_ ## name = (_gss_##name##_t *)dlsym(so, "gss_" #name); \
 	if (!m->gm_mech.gm_ ## name ||					\
 	    m->gm_mech.gm_ ##name == gss_ ## name) {			\
 		fprintf(stderr, "can't find symbol gss_" #name "\n");	\
@@ -174,26 +174,26 @@ do {									\
 
 #define OPTSYM(name)							\
 do {									\
-	m->gm_mech.gm_ ## name = dlsym(so, "gss_" #name);		\
+	m->gm_mech.gm_ ## name =  (_gss_##name##_t *)dlsym(so, "gss_" #name); \
 	if (m->gm_mech.gm_ ## name == gss_ ## name)			\
 		m->gm_mech.gm_ ## name = NULL;				\
 } while (0)
 
 #define OPTSPISYM(name)							\
 do {									\
-	m->gm_mech.gm_ ## name = dlsym(so, "gssspi_" #name);		\
+	m->gm_mech.gm_ ## name =  (_gss_##name##_t *)dlsym(so, "gssspi_" #name); \
 } while (0)
 
 #define COMPATSYM(name)							\
 do {									\
-	m->gm_mech.gm_compat->gmc_ ## name = dlsym(so, "gss_" #name);	\
+	m->gm_mech.gm_compat->gmc_ ## name =  (_gss_##name##_t *)dlsym(so, "gss_" #name); \
 	if (m->gm_mech.gm_compat->gmc_ ## name == gss_ ## name)		\
 		m->gm_mech.gm_compat->gmc_ ## name = NULL;		\
 } while (0)
 
 #define COMPATSPISYM(name)						\
 do {									\
-	m->gm_mech.gm_compat->gmc_ ## name = dlsym(so, "gssspi_" #name);\
+	m->gm_mech.gm_compat->gmc_ ## name =  (_gss_##name##_t *)dlsym(so, "gssspi_" #name); \
 	if (m->gm_mech.gm_compat->gmc_ ## name == gss_ ## name)		\
 		m->gm_mech.gm_compat->gmc_ ## name = NULL;		\
 } while (0)
@@ -314,14 +314,6 @@ _gss_load_mech(void)
 		if (found)
 			continue;
 
-#ifndef RTLD_LOCAL
-#define RTLD_LOCAL 0
-#endif
-
-#ifndef RTLD_GROUP
-#define RTLD_GROUP 0
-#endif
-
 		so = dlopen(lib, RTLD_LAZY | RTLD_LOCAL | RTLD_GROUP);
 		if (so == NULL) {
 /*			fprintf(stderr, "dlopen: %s\n", dlerror()); */
@@ -386,8 +378,8 @@ _gss_load_mech(void)
 		OPTSYM(store_cred);
 		OPTSYM(export_cred);
 		OPTSYM(import_cred);
+		OPTSYM(acquire_cred_from);
 #if 0
-		OPTSYM(acquire_cred_ext);
 		OPTSYM(iter_creds);
 		OPTSYM(destroy_cred);
 		OPTSYM(cred_hold);
@@ -403,9 +395,13 @@ _gss_load_mech(void)
 		OPTSYM(export_name_composite);
 		OPTSYM(localname);
 		OPTSYM(duplicate_cred);
+		OPTSYM(add_cred_from);
+		OPTSYM(store_cred_into);
+		OPTSYM(set_neg_mechs);
+		OPTSYM(get_neg_mechs);
 		OPTSPISYM(authorize_localname);
 
-		mi = dlsym(so, "gss_mo_init");
+		mi = (_gss_mo_init *)dlsym(so, "gss_mo_init");
 		if (mi != NULL) {
 			major_status = mi(&minor_status, mech_oid,
 					  &m->gm_mech.gm_mo, &m->gm_mech.gm_mo_num);
@@ -455,6 +451,19 @@ __gss_get_mechanism(gss_const_OID mech)
 	HEIM_SLIST_FOREACH(m, &_gss_mechs, gm_link) {
 		if (gss_oid_equal(&m->gm_mech.gm_mech_oid, mech))
 			return &m->gm_mech;
+	}
+	return NULL;
+}
+
+gss_OID
+_gss_mg_support_mechanism(gss_const_OID mech)
+{
+	struct _gss_mech_switch *m;
+
+	_gss_load_mech();
+	HEIM_SLIST_FOREACH(m, &_gss_mechs, gm_link) {
+		if (gss_oid_equal(&m->gm_mech.gm_mech_oid, mech))
+			return m->gm_mech_oid;
 	}
 	return NULL;
 }

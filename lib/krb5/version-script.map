@@ -183,6 +183,7 @@ HEIMDAL_KRB5_2.0 {
 		krb5_crypto_init;
 		krb5_crypto_overhead;
 		krb5_crypto_prf;
+		krb5_crypto_prfplus;
 		krb5_crypto_prf_length;
 		krb5_crypto_length;
 		krb5_crypto_length_iov;
@@ -362,6 +363,7 @@ HEIMDAL_KRB5_2.0 {
 		krb5_get_init_creds_opt_set_tkt_life;
 		krb5_get_init_creds_opt_set_win2k;
 		krb5_get_init_creds_password;
+		krb5_get_instance;
 		krb5_get_kdc_cred;
 		krb5_get_kdc_sec_offset;
 		krb5_get_krb524hst;
@@ -494,6 +496,7 @@ HEIMDAL_KRB5_2.0 {
 		krb5_principal_set_comp_string;
 		krb5_principal_set_realm;
 		krb5_principal_set_type;
+		krb5_principal_is_anonymous;
 		krb5_principal_is_krbtgt;
 		krb5_print_address;
 		krb5_program_setup;
@@ -646,6 +649,7 @@ HEIMDAL_KRB5_2.0 {
 		krb5_string_to_key_derived;
 		krb5_string_to_key_salt;
 		krb5_string_to_key_salt_opaque;
+		krb5_string_to_keysalts2;
 		krb5_string_to_keytype;
 		krb5_string_to_salttype;
 		krb5_ticket_get_authorization_data_type;
@@ -747,6 +751,10 @@ HEIMDAL_KRB5_2.0 {
 		_krb5_build_authenticator;
 		_krb5_kt_client_default_name;
 
+		# Shared with libkadm5
+		_krb5_load_plugins;
+		_krb5_unload_plugins;
+
 		# Shared with libkdc
 		_krb5_AES_SHA1_string_to_default_iterator;
 		_krb5_AES_SHA2_string_to_default_iterator;
@@ -760,13 +768,12 @@ HEIMDAL_KRB5_2.0 {
 		_krb5_pk_load_id;
 		_krb5_pk_mk_ContentInfo;
 		_krb5_pk_octetstring2key;
-		_krb5_plugin_find;
-		_krb5_plugin_free;
 		_krb5_plugin_run_f;
 		_krb5_principal2principalname;
 		_krb5_principalname2krb5_principal;
 		_krb5_put_int;
 		_krb5_s4u2self_to_checksumdata;
+		_krb5_HMAC_MD5_checksum;
 
 		# kinit helper
 		krb5_get_init_creds_opt_set_pkinit_user_certs;

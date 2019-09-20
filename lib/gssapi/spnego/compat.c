@@ -232,7 +232,7 @@ add_mech_type(gss_OID mech_type,
 OM_uint32 GSSAPI_CALLCONV
 _gss_spnego_indicate_mechtypelist (OM_uint32 *minor_status,
 				   gss_name_t target_name,
-				   OM_uint32 (*func)(gss_name_t, gss_OID),
+				   OM_uint32 (*func)(gss_const_cred_id_t, gss_name_t, gss_OID),
 				   int includeMSCompatOID,
 				   gss_const_cred_id_t cred_handle,
 				   MechTypeList *mechtypelist,
@@ -267,7 +267,7 @@ _gss_spnego_indicate_mechtypelist (OM_uint32 *minor_status,
 	return GSS_S_FAILURE;
     }
 
-    ret = (*func)(target_name, GSS_KRB5_MECHANISM);
+    ret = (*func)(cred_handle, target_name, GSS_KRB5_MECHANISM);
     if (ret == GSS_S_COMPLETE) {
 	ret = add_mech_type(GSS_KRB5_MECHANISM,
 			    includeMSCompatOID,
@@ -284,7 +284,7 @@ _gss_spnego_indicate_mechtypelist (OM_uint32 *minor_status,
 	if (gss_oid_equal(&supported_mechs->elements[i], GSS_KRB5_MECHANISM))
 	    continue;
 
-	subret = (*func)(target_name, &supported_mechs->elements[i]);
+	subret = (*func)(cred_handle, target_name, &supported_mechs->elements[i]);
 	if (subret != GSS_S_COMPLETE)
 	    continue;
 
@@ -314,4 +314,20 @@ _gss_spnego_indicate_mechtypelist (OM_uint32 *minor_status,
     gss_release_oid_set(minor_status, &supported_mechs);
 
     return ret;
+}
+
+OM_uint32
+_gss_spnego_ntlm_reset_crypto(OM_uint32 *minor_status,
+			      gssspnego_ctx ctx,
+			      OM_uint32 verify)
+{
+    gss_buffer_desc value;
+
+    value.length = sizeof(verify);
+    value.value = &verify;
+
+    return gss_set_sec_context_option(minor_status,
+				      &ctx->negotiated_ctx_id,
+				      GSS_C_NTLM_RESET_CRYPTO,
+				      &value);
 }

@@ -109,13 +109,6 @@ extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ma_mech_name_oid_desc;
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ma_mech_description_oid_desc;
 #define GSS_C_MA_MECH_DESCRIPTION (&__gss_c_ma_mech_description_oid_desc)
 
- /* credential types */
-extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_cred_password_oid_desc;
-#define GSS_C_CRED_PASSWORD (&__gss_c_cred_password_oid_desc)
-
-extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_cred_certificate_oid_desc;
-#define GSS_C_CRED_CERTIFICATE (&__gss_c_cred_certificate_oid_desc)
-
 /* Heimdal mechanisms - 1.2.752.43.14 */
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_sasl_digest_md5_mechanism_oid_desc;
 #define GSS_SASL_DIGEST_MD5_MECHANISM (&__gss_sasl_digest_md5_mechanism_oid_desc)
@@ -154,6 +147,9 @@ extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_spnego_mechanism_oid_desc;
  /* From Luke Howard */
 extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_peer_has_updated_spnego_oid_desc;
 #define GSS_C_PEER_HAS_UPDATED_SPNEGO (&__gss_c_peer_has_updated_spnego_oid_desc)
+
+extern GSSAPI_LIB_VARIABLE gss_OID_desc __gss_c_ntlm_reset_crypto_oid_desc;
+#define GSS_C_NTLM_RESET_CRYPTO (&__gss_c_ntlm_reset_crypto_oid_desc)
 
 /*
  * OID mappings with name and short description and and slightly longer description

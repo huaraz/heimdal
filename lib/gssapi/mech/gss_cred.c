@@ -133,13 +133,12 @@ gss_import_cred(OM_uint32 * minor_status,
 	return GSS_S_FAILURE;
     }
 
-    cred = calloc(1, sizeof(struct _gss_cred));
+    cred = _gss_mg_alloc_cred();
     if (cred == NULL) {
 	krb5_storage_free(sp);
 	*minor_status = ENOMEM;
 	return GSS_S_FAILURE;
     }
-    HEIM_SLIST_INIT(&cred->gc_mc);
 
     *cred_handle = (gss_cred_id_t)cred;
 
@@ -158,7 +157,7 @@ gss_import_cred(OM_uint32 * minor_status,
 	    goto out;
 	}
 	oid.elements = data.data;
-	oid.length = data.length;
+	oid.length = (OM_uint32)data.length;
 
 	m = __gss_get_mechanism(&oid);
 	krb5_data_free(&data);
@@ -223,3 +222,4 @@ gss_import_cred(OM_uint32 * minor_status,
     return major;
 
 }
+

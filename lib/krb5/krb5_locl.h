@@ -134,6 +134,7 @@ struct ContentInfo;
 struct AlgorithmIdentifier;
 typedef struct krb5_pk_init_ctx_data *krb5_pk_init_ctx;
 struct krb5_dh_moduli;
+struct krb5_plugin_data;
 
 /* v4 glue */
 struct _krb5_krb_auth_data;
@@ -212,6 +213,8 @@ struct _krb5_get_init_creds_opt_private {
 #define KRB5_INIT_CREDS_CANONICALIZE		1
 #define KRB5_INIT_CREDS_NO_C_CANON_CHECK	2
 #define KRB5_INIT_CREDS_NO_C_NO_EKU_CHECK	4
+#define KRB5_INIT_CREDS_PKINIT_KX_VALID		32
+#define KRB5_INIT_CREDS_PKINIT_NO_KRBTGT_OTHERNAME_CHECK    64
     struct {
         krb5_gic_process_last_req func;
         void *ctx;
@@ -308,6 +311,7 @@ typedef struct krb5_context_data {
 #define EXTRACT_TICKET_MATCH_REALM			4
 #define EXTRACT_TICKET_AS_REQ				8
 #define EXTRACT_TICKET_TIMESYNC				16
+#define EXTRACT_TICKET_MATCH_ANON			32
 
 /*
  * Configurable options
@@ -392,5 +396,13 @@ struct krb5_pk_init_ctx_data {
 #else
 # define ISPATHSEP(x) (x == '/')
 #endif
+
+struct krb5_plugin_data {
+    const char *module;
+    const char *name;
+    int min_version;
+    const char **deps;
+    krb5_get_instance_func_t get_instance;
+};
 
 #endif /* __KRB5_LOCL_H__ */

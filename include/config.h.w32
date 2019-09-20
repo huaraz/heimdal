@@ -55,12 +55,31 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 #ifndef KRB5_LIB
 #ifdef _WIN32
 #define KRB5_LIB_FUNCTION
+#define KRB5_LIB_NORETURN_FUNCTION __declspec(noreturn)
 #define KRB5_LIB_CALL     __stdcall
 #define KRB5_LIB_VARIABLE
 #else
 #define KRB5_LIB_FUNCTION
+#define KRB5_LIB_NORETURN_FUNCTION
 #define KRB5_LIB_CALL
 #define KRB5_LIB_VARIABLE
+#endif
+#endif
+#endif
+
+
+#ifdef BUILD_HX509_LIB
+#ifndef HX509_LIB
+#ifdef _WIN32
+#define HX509_LIB_FUNCTION
+#define HX509_LIB_NORETURN_FUNCTION __declspec(noreturn)
+#define HX509_LIB_CALL     __stdcall
+#define HX509_LIB_VARIABLE
+#else
+#define HX509_LIB_FUNCTION
+#define HX509_LIB_NORETURN_FUNCTION
+#define HX509_LIB_CALL
+#define HX509_LIB_VARIABLE
 #endif
 #endif
 #endif
@@ -70,10 +89,12 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 #ifndef ROKEN_LIB
 #ifdef _WIN32
 #define ROKEN_LIB_FUNCTION
+#define ROKEN_LIB_NORETURN_FUNCTION __declspec(noreturn)
 #define ROKEN_LIB_CALL     __cdecl
 #define ROKEN_LIB_VARIABLE
 #else
 #define ROKEN_LIB_FUNCTION
+#define ROKEN_LIB_NORETURN_FUNCTION
 #define ROKEN_LIB_CALL
 #define ROKEN_LIB_VARIABLE
 #endif
@@ -85,10 +106,12 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 #ifndef GSSAPI_LIB
 #ifdef _WIN32
 #define GSSAPI_LIB_FUNCTION
+#define GSSAPI_LIB_NORETURN_FUNCTION __declspec(noreturn)
 #define GSSAPI_LIB_CALL     __stdcall
 #define GSSAPI_LIB_VARIABLE
 #else
 #define GSSAPI_LIB_FUNCTION
+#define GSSAPI_LIB_NORETURN_FUNCTION
 #define GSSAPI_LIB_CALL
 #define GSSAPI_LIB_VARIABLE
 #endif
@@ -845,7 +868,7 @@ static const char *const rcsid[] = { (const char *)rcsid, "@(#)" msg }
 #define HAVE_STRERROR 1
 
 /* Define if you have the function `strftime'. */
-#define HAVE_STRFTIME 1
+/* #define HAVE_STRFTIME 1 */
 
 /* Define to 1 if you have the <strings.h> header file. */
 /* #define HAVE_STRINGS_H 1 */

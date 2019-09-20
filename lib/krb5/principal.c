@@ -1247,6 +1247,56 @@ krb5_principal_is_root_krbtgt(krb5_context context, krb5_const_principal p)
 	strcmp(p->name.name_string.val[1], p->realm) == 0;
 }
 
+/**
+ * Returns true iff name is WELLKNOWN/ANONYMOUS
+ *
+ * @ingroup krb5_principal
+ */
+
+KRB5_LIB_FUNCTION krb5_boolean KRB5_LIB_CALL
+krb5_principal_is_anonymous(krb5_context context,
+			     krb5_const_principal p,
+			     unsigned int flags)
+{
+    /*
+     * Heimdal versions 7.5 and below left the name-type at KRB5_NT_PRINCIPAL
+     * even with anonymous pkinit responses.  To retain interoperability with
+     * legacy KDCs, the name-type is not checked by the client after requesting
+     * a fully anonymous ticket.
+     */
+    if (!(flags & KRB5_ANON_IGNORE_NAME_TYPE) &&
+        p->name.name_type != KRB5_NT_WELLKNOWN &&
+        p->name.name_type != KRB5_NT_UNKNOWN)
+        return FALSE;
+
+    if (p->name.name_string.len != 2 ||
+        strcmp(p->name.name_string.val[0], KRB5_WELLKNOWN_NAME) != 0 ||
+        strcmp(p->name.name_string.val[1], KRB5_ANON_NAME) != 0)
+        return FALSE;
+
+    /*
+     * While unauthenticated clients SHOULD get "WELLKNOWN:ANONYMOUS" as their
+     * realm, Heimdal KDCs prior to 7.0 returned the requested realm.  While
+     * such tickets might lead *servers* to unwittingly grant access to fully
+     * anonymous clients, trusting that the client was authenticated to the
+     * realm in question, doing it right is the KDC's job, the client should
+     * not refuse such a ticket.
+     *
+     * If we ever do decide to enforce WELLKNOWN:ANONYMOUS for unauthenticated
+     * clients, it is essential that calls that pass KRB5_ANON_MATCH_ANY still
+     * ignore the realm, as in that case either case matches one of the two
+     * possible conditions.
+     */
+    if (flags & KRB5_ANON_MATCH_UNAUTHENTICATED)
+        return TRUE;
+
+    /*
+     * Finally, authenticated clients that asked to be only anonymized do
+     * legitimately expect a non-anon realm.
+     */
+    return strcmp(p->realm, KRB5_ANON_REALM) != 0;
+}
+
 static int
 tolower_ascii(int c)
 {

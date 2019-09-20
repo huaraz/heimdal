@@ -43,31 +43,15 @@ _gss_ntlm_duplicate_cred(OM_uint32 *minor_status,
     OM_uint32 junk;
 
     if (input_cred_handle == GSS_C_NO_CREDENTIAL)
-        return _gss_ntlm_acquire_cred(minor_status, GSS_C_NO_NAME,
-                                      GSS_C_INDEFINITE, GSS_C_NO_OID_SET,
-                                      GSS_C_BOTH, output_cred_handle, NULL,
-                                      NULL);
+        return _gss_ntlm_acquire_cred_from(minor_status, GSS_C_NO_NAME,
+					   GSS_C_INDEFINITE, GSS_C_NO_OID_SET,
+					   GSS_C_BOTH, GSS_C_NO_CRED_STORE,
+					   output_cred_handle, NULL, NULL);
 
     *output_cred_handle = GSS_C_NO_CREDENTIAL;
-    if ((new_cred = calloc(1, sizeof(*new_cred))) == NULL) {
-        *minor_status = ENOMEM;
-        return GSS_S_FAILURE;
-    }
-    
-    new_cred->usage = cred->usage;
-    new_cred->username = strdup(cred->username);
-    new_cred->domain = strdup(cred->domain);
-    new_cred->key.data = malloc(cred->key.length);
-    if (new_cred->username == NULL || new_cred->domain == NULL ||
-        new_cred->key.data == NULL) {
-        *output_cred_handle = (gss_cred_id_t) new_cred;
-        _gss_ntlm_release_cred(&junk, output_cred_handle);
-        *minor_status = ENOMEM;
-        return GSS_S_FAILURE;
-    }
 
-    memcpy(new_cred->key.data, cred->key.data, cred->key.length);
-    new_cred->key.length = cred->key.length;
-    *output_cred_handle = (gss_cred_id_t) new_cred;
-    return GSS_S_COMPLETE;
+    *minor_status = _gss_ntlm_copy_cred((ntlm_cred)input_cred_handle,
+					(ntlm_cred *)output_cred_handle);
+ 
+    return *minor_status == 0 ? GSS_S_COMPLETE : GSS_S_FAILURE;
 }

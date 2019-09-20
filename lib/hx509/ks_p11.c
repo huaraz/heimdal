@@ -32,9 +32,6 @@
  */
 
 #include "hx_locl.h"
-#ifdef HAVE_DLFCN_H
-#include <dlfcn.h>
-#endif
 
 #ifdef HAVE_DLOPEN
 
@@ -849,7 +846,7 @@ p11_init(hx509_context context,
 	str = strnext;
     }
 
-    p->dl_handle = dlopen(list, RTLD_NOW);
+    p->dl_handle = dlopen(list, RTLD_NOW | RTLD_LOCAL | RTLD_GROUP);
     if (p->dl_handle == NULL) {
 	ret = HX509_PKCS11_LOAD;
 	hx509_set_error_string(context, 0, ret,
@@ -1211,7 +1208,7 @@ static struct hx509_keyset_ops keyset_pkcs11 = {
 
 #endif /* HAVE_DLOPEN */
 
-void
+HX509_LIB_FUNCTION void HX509_LIB_CALL
 _hx509_ks_pkcs11_register(hx509_context context)
 {
 #ifdef HAVE_DLOPEN

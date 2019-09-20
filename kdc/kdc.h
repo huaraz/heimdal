@@ -69,6 +69,7 @@ typedef struct krb5_kdc_configuration {
     krb5_boolean check_ticket_addresses;
     krb5_boolean allow_null_ticket_addresses;
     krb5_boolean allow_anonymous;
+    krb5_boolean historical_anon_realm;
     krb5_boolean strict_nametypes;
     enum krb5_kdc_trpolicy trpolicy;
 
@@ -94,6 +95,9 @@ typedef struct krb5_kdc_configuration {
     int enable_kx509;
     const char *kx509_template;
     const char *kx509_ca;
+
+    krb5_boolean enable_derived_keys;
+    int derived_keys_ndots;
 
 } krb5_kdc_configuration;
 

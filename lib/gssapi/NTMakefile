@@ -96,11 +96,13 @@ mechsrc = \
 	mech/context.h \
 	mech/context.c \
 	mech/cred.h \
+	mech/cred.c \
 	mech/gss_accept_sec_context.c \
 	mech/gss_acquire_cred.c \
-	mech/gss_acquire_cred_ext.c \
+	mech/gss_acquire_cred_from.c \
 	mech/gss_acquire_cred_with_password.c \
 	mech/gss_add_cred.c \
+	mech/gss_add_cred_from.c \
 	mech/gss_add_cred_with_password.c \
 	mech/gss_add_oid_set_member.c \
 	mech/gss_aeap.c \
@@ -125,6 +127,7 @@ mechsrc = \
 	mech/gss_export_name_composite.c \
 	mech/gss_export_sec_context.c \
 	mech/gss_get_mic.c \
+	mech/gss_get_neg_mechs.c \
 	mech/gss_get_name_attribute.c \
 	mech/gss_import_name.c \
 	mech/gss_import_sec_context.c \
@@ -155,9 +158,11 @@ mechsrc = \
 	mech/gss_seal.c \
 	mech/gss_set_cred_option.c \
 	mech/gss_set_name_attribute.c \
+	mech/gss_set_neg_mechs.c \
 	mech/gss_set_sec_context_option.c \
 	mech/gss_sign.c \
 	mech/gss_store_cred.c \
+	mech/gss_store_cred_into.c \
 	mech/gss_test_oid_set_member.c \
 	mech/gss_unseal.c \
 	mech/gss_unwrap.c \
@@ -213,6 +218,7 @@ ntlmsrc = \
 	ntlm/process_context_token.c \
 	ntlm/release_cred.c \
 	ntlm/release_name.c \
+	ntlm/set_sec_context_option.c \
 	ntlm/kdc.c
 
 $(OBJ)\ntlm\ntlm-private.h: $(ntlmsrc)
@@ -326,11 +332,13 @@ libgssapi_OBJs = \
 	$(OBJ)\krb5/verify_mic.obj \
 	$(OBJ)\krb5/wrap.obj \
 	$(OBJ)\mech/context.obj \
+	$(OBJ)\mech/cred.obj \
 	$(OBJ)\mech/gss_accept_sec_context.obj \
 	$(OBJ)\mech/gss_acquire_cred.obj \
-	$(OBJ)\mech/gss_acquire_cred_ext.obj \
+	$(OBJ)\mech/gss_acquire_cred_from.obj \
 	$(OBJ)\mech/gss_acquire_cred_with_password.obj \
 	$(OBJ)\mech/gss_add_cred.obj \
+	$(OBJ)\mech/gss_add_cred_from.obj \
 	$(OBJ)\mech/gss_add_cred_with_password.obj \
 	$(OBJ)\mech/gss_add_oid_set_member.obj \
 	$(OBJ)\mech/gss_aeap.obj \
@@ -355,6 +363,7 @@ libgssapi_OBJs = \
 	$(OBJ)\mech/gss_export_name_composite.obj \
 	$(OBJ)\mech/gss_export_sec_context.obj \
 	$(OBJ)\mech/gss_get_mic.obj \
+	$(OBJ)\mech/gss_get_neg_mechs.obj \
 	$(OBJ)\mech/gss_get_name_attribute.obj \
 	$(OBJ)\mech/gss_import_name.obj \
 	$(OBJ)\mech/gss_import_sec_context.obj \
@@ -385,9 +394,11 @@ libgssapi_OBJs = \
 	$(OBJ)\mech/gss_seal.obj \
 	$(OBJ)\mech/gss_set_cred_option.obj \
 	$(OBJ)\mech/gss_set_name_attribute.obj \
+	$(OBJ)\mech/gss_set_neg_mechs.obj \
 	$(OBJ)\mech/gss_set_sec_context_option.obj \
 	$(OBJ)\mech/gss_sign.obj \
 	$(OBJ)\mech/gss_store_cred.obj \
+	$(OBJ)\mech/gss_store_cred_into.obj \
 	$(OBJ)\mech/gss_test_oid_set_member.obj \
 	$(OBJ)\mech/gss_unseal.obj \
 	$(OBJ)\mech/gss_unwrap.obj \
@@ -432,6 +443,7 @@ libgssapi_OBJs = \
 	$(OBJ)\ntlm/process_context_token.obj \
 	$(OBJ)\ntlm/release_cred.obj \
 	$(OBJ)\ntlm/release_name.obj \
+	$(OBJ)\ntlm/set_sec_context_option.obj \
 	$(OBJ)\ntlm/kdc.obj \
 	$(OBJ)\gkrb5_err.obj \
 	$(spnego_files:.x=.obj) \

@@ -38,14 +38,16 @@
  */
 
 static OM_uint32
-initiator_approved(gss_name_t target_name, gss_OID mech)
+initiator_approved(gss_const_cred_id_t cred,
+		   gss_name_t target_name,
+		   gss_OID mech)
 {
     OM_uint32 min_stat, maj_stat;
     gss_ctx_id_t ctx = GSS_C_NO_CONTEXT;
     gss_buffer_desc out;
 
     maj_stat = gss_init_sec_context(&min_stat,
-				    GSS_C_NO_CREDENTIAL,
+				    cred,
 				    &ctx,
 				    target_name,
 				    mech,
@@ -134,6 +136,9 @@ spnego_reply_internal(OM_uint32 *minor_status,
 			  0,
 			  mech_buf,
 			  &mic_buf);
+	if (ret == GSS_S_COMPLETE &&
+	    gss_oid_equal(context_handle->negotiated_mech_type, GSS_NTLM_MECHANISM))
+	    _gss_spnego_ntlm_reset_crypto(minor_status, context_handle, 0);
 	if (ret == GSS_S_COMPLETE) {
 	    ALLOC(nt.u.negTokenResp.mechListMIC, 1);
 	    if (nt.u.negTokenResp.mechListMIC == NULL) {
@@ -578,6 +583,9 @@ spnego_reply
 				 &mech_buf,
 				 &mic_buf,
 				 NULL);
+	   if (ret == GSS_S_COMPLETE &&
+	       gss_oid_equal(ctx->negotiated_mech_type, GSS_NTLM_MECHANISM))
+		_gss_spnego_ntlm_reset_crypto(minor_status, ctx, 1);
 	   if (ret) {
 		HEIMDAL_MUTEX_unlock(&ctx->ctx_id_mutex);
 		free(mech_buf.value);

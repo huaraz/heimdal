@@ -32,11 +32,11 @@
  * SUCH DAMAGE.
  */
 
-#if defined(_WIN32) && _MSC_VER >= 1400
+# if defined(_WIN32) && _MSC_VER >= 1400
 /* _CRT_RAND_S must be defined before including stdlib.h */
-# define _CRT_RAND_S
-# define HAVE_WIN32_RAND_S 1
-#endif
+#  define _CRT_RAND_S
+#  define HAVE_WIN32_RAND_S 1
+# endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,22 +52,49 @@
 #include <util.h>
 #endif
 
-#ifndef ROKEN_LIB_FUNCTION
-#ifdef _WIN32
-#  define ROKEN_LIB_CALL     __cdecl
-#  ifdef ROKEN_LIB_DYNAMIC
+# ifndef ROKEN_LIB_FUNCTION
+#  ifdef _WIN32
+#   ifdef ROKEN_LIB_DYNAMIC
 #    define ROKEN_LIB_FUNCTION __declspec(dllimport)
-#    define ROKEN_LIB_VARIABLE __declspec(dllimport)
-#  else
+#   else
 #    define ROKEN_LIB_FUNCTION
-#    define ROKEN_LIB_VARIABLE
+#   endif
+#  else
+#   define ROKEN_LIB_FUNCTION
 #  endif
-#else
-#define ROKEN_LIB_FUNCTION
-#define ROKEN_LIB_CALL
-#define ROKEN_LIB_VARIABLE
-#endif
-#endif
+# endif
+
+# ifndef ROKEN_LIB_NORETURN_FUNCTION
+#  ifdef _WIN32
+#   ifdef ROKEN_LIB_DYNAMIC
+#    define ROKEN_LIB_NORETURN_FUNCTION __declspec(dllimport noreturn)
+#   else
+#    define ROKEN_LIB_NORETURN_FUNCTION __declspec(noreturn)
+#   endif
+#  else
+#   define ROKEN_LIB_NORETURN_FUNCTION
+#  endif
+# endif
+
+# ifndef ROKEN_LIB_CALL
+#  ifdef _WIN32
+#   define ROKEN_LIB_CALL     __cdecl
+#  else
+#   define ROKEN_LIB_CALL
+#  endif
+# endif
+
+# ifndef ROKEN_LIB_VARIABLE
+#  ifdef _WIN32
+#   ifdef ROKEN_LIB_DYNAMIC
+#    define ROKEN_LIB_VARIABLE __declspec(dllimport)
+#   else
+#    define ROKEN_LIB_VARIABLE
+#   endif
+#  else
+#   define ROKEN_LIB_VARIABLE
+#  endif
+# endif
 
 #ifdef HAVE_WINSOCK
 /* Declarations for Microsoft Windows */
@@ -267,6 +294,10 @@ struct sockaddr_dl;
 
 #ifdef HAVE_PATHS_H
 #include <paths.h>
+#endif
+
+#ifdef HAVE_DLFCN_H
+#include <dlfcn.h>
 #endif
 
 #ifdef HAVE_DIRENT_H

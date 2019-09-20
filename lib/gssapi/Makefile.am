@@ -78,13 +78,15 @@ mechsrc = \
 	mech/context.h \
 	mech/context.c \
 	mech/cred.h \
+	mech/cred.c \
 	mech/compat.h \
 	mech/doxygen.c \
 	mech/gss_accept_sec_context.c \
 	mech/gss_acquire_cred.c \
-	mech/gss_acquire_cred_ext.c \
+	mech/gss_acquire_cred_from.c \
 	mech/gss_acquire_cred_with_password.c \
 	mech/gss_add_cred.c \
+	mech/gss_add_cred_from.c \
 	mech/gss_add_cred_with_password.c \
 	mech/gss_add_oid_set_member.c \
 	mech/gss_aeap.c \
@@ -108,6 +110,7 @@ mechsrc = \
 	mech/gss_export_name_composite.c \
 	mech/gss_export_sec_context.c \
 	mech/gss_get_mic.c \
+	mech/gss_get_neg_mechs.c \
 	mech/gss_get_name_attribute.c \
 	mech/gss_import_name.c \
 	mech/gss_import_sec_context.c \
@@ -138,9 +141,11 @@ mechsrc = \
 	mech/gss_seal.c \
 	mech/gss_set_cred_option.c \
 	mech/gss_set_name_attribute.c \
+	mech/gss_set_neg_mechs.c \
 	mech/gss_set_sec_context_option.c \
 	mech/gss_sign.c \
 	mech/gss_store_cred.c \
+	mech/gss_store_cred_into.c \
 	mech/gss_test_oid_set_member.c \
 	mech/gss_unseal.c \
 	mech/gss_unwrap.c \
@@ -197,6 +202,7 @@ ntlmsrc = \
 	ntlm/process_context_token.c \
 	ntlm/release_cred.c \
 	ntlm/release_name.c \
+	ntlm/set_sec_context_option.c \
 	ntlm/kdc.c
 
 $(srcdir)/ntlm/ntlm-private.h: $(ntlmsrc)

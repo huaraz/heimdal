@@ -2,6 +2,8 @@
  * Copyright (c) 2005 Doug Rabson
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -60,11 +62,24 @@ gss_compare_name(OM_uint32 *minor_status,
 
 			major_status = _gss_find_mn(minor_status, name2,
 						    mn1->gmn_mech_oid, &mn2);
-			if (major_status == GSS_S_COMPLETE) {
+			if (major_status == GSS_S_COMPLETE && mn2) {
 				return (mn1->gmn_mech->gm_compare_name(
 						minor_status,
 						mn1->gmn_name,
 						mn2->gmn_name,
+						name_equal));
+			}
+		}
+		HEIM_SLIST_FOREACH(mn2, &name2->gn_mn, gmn_link) {
+			OM_uint32 major_status;
+
+			major_status = _gss_find_mn(minor_status, name1,
+						    mn2->gmn_mech_oid, &mn1);
+			if (major_status == GSS_S_COMPLETE && mn1) {
+				return (mn2->gmn_mech->gm_compare_name(
+						minor_status,
+						mn2->gmn_name,
+						mn1->gmn_name,
 						name_equal));
 			}
 		}

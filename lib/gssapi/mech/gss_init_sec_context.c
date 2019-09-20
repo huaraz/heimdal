@@ -2,6 +2,8 @@
  * Copyright (c) 2005 Doug Rabson
  * All rights reserved.
  *
+ * Portions Copyright (c) 2009 Apple Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -194,7 +196,7 @@ gss_init_sec_context(OM_uint32 * minor_status,
 	major_status = m->gm_init_sec_context(minor_status,
 	    cred_handle,
 	    &ctx->gc_ctx,
-	    mn->gmn_name,
+	    mn ? mn->gmn_name : GSS_C_NO_NAME,
 	    mech_type,
 	    req_flags,
 	    time_req,
@@ -210,7 +212,7 @@ gss_init_sec_context(OM_uint32 * minor_status,
 		if (allocated_ctx)
 			free(ctx);
 		_mg_buffer_zero(output_token);
-		_gss_mg_error(m, major_status, *minor_status);
+		_gss_mg_error(m, *minor_status);
 	} else {
 		*context_handle = (gss_ctx_id_t) ctx;
 	}

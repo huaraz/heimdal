@@ -56,8 +56,10 @@
 
 #ifdef _WIN32
 #define KRB5_CALLCONV __stdcall
+#define KRB5_LIB_CALL __stdcall
 #else
 #define KRB5_CALLCONV
+#define KRB5_LIB_CALL
 #endif
 
 /* simple constants */
@@ -449,6 +451,7 @@ typedef union {
 #define KRB5_GC_NO_TRANSIT_CHECK	(1U << 5)
 #define KRB5_GC_CONSTRAINED_DELEGATION	(1U << 6)
 #define KRB5_GC_CANONICALIZE		(1U << 7)
+#define KRB5_GC_ANONYMOUS		(1U << 8)
 
 /* constants for compare_creds (and cc_retrieve_cred) */
 #define KRB5_TC_DONT_MATCH_REALM	(1U << 31)
@@ -873,13 +876,15 @@ typedef krb5_error_code
 (KRB5_CALLCONV * krb5_sendto_ctx_func)(krb5_context, krb5_sendto_ctx, void *,
 				       const krb5_data *, int *);
 
-struct krb5_plugin;
 enum krb5_plugin_type {
     PLUGIN_TYPE_DATA = 1,
-    PLUGIN_TYPE_FUNC
+    PLUGIN_TYPE_FUNC /* no longer supported */
 };
 
 #define KRB5_PLUGIN_INVOKE_ALL  1
+
+typedef uintptr_t
+(KRB5_LIB_CALL *krb5_get_instance_func_t)(const char *);
 
 struct credentials; /* this is to keep the compiler happy */
 struct getargs;
@@ -940,6 +945,26 @@ typedef enum krb5_name_canon_rule_options {
 typedef struct krb5_name_canon_rule_data *krb5_name_canon_rule;
 typedef const struct krb5_name_canon_rule_data *krb5_const_name_canon_rule;
 typedef struct krb5_name_canon_iterator_data *krb5_name_canon_iterator;
+
+/*
+ * krb5_get_init_creds_opt_set_pkinit flags
+ */
+
+#define KRB5_GIC_OPT_PKINIT_USE_ENCKEY	    2 /* use RSA, not DH */
+#define KRB5_GIC_OPT_PKINIT_ANONYMOUS	    4 /* anonymous PKINIT */
+#define KRB5_GIC_OPT_PKINIT_BTMM	    8 /* reserved by Apple */
+#define KRB5_GIC_OPT_PKINIT_NO_KDC_ANCHOR   16 /* do not authenticate KDC */
+
+/*
+ * _krb5_principal_is_anonymous() flags 
+ */
+#define KRB5_ANON_MATCH_AUTHENTICATED	1 /* authenticated with anon flag */
+#define KRB5_ANON_MATCH_UNAUTHENTICATED	2 /* anonymous PKINIT */
+#define KRB5_ANON_IGNORE_NAME_TYPE	4 /* don't check the name type */
+#define KRB5_ANON_MATCH_ANY	        ( KRB5_ANON_MATCH_AUTHENTICATED | \
+                                          KRB5_ANON_MATCH_UNAUTHENTICATED )
+#define KRB5_ANON_MATCH_ANY_NONT	( KRB5_ANON_MATCH_ANY | \
+                                          KRB5_ANON_IGNORE_NAME_TYPE )
 
 /*
  *

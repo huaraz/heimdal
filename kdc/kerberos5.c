@@ -116,6 +116,23 @@ is_default_salt_p(const krb5_salt *default_salt, const Key *key)
     return TRUE;
 }
 
+
+krb5_boolean
+_kdc_is_anon_request(const KDC_REQ *req)
+{
+    const KDC_REQ_BODY *b = &req->req_body;
+
+    /*
+     * Versions of Heimdal from 0.9rc1 through 1.50 use bit 14 instead
+     * of 16 for request_anonymous, as indicated in the anonymous draft
+     * prior to version 11. Bit 14 is assigned to S4U2Proxy, but S4U2Proxy
+     * requests are only sent to the TGS and, in any case, would have an
+     * additional ticket present.
+     */
+    return b->kdc_options.request_anonymous ||
+	   (b->kdc_options.cname_in_addl_tkt && !b->additional_tickets);
+}
+
 /*
  * return the first appropriate key of `princ' in `ret_key'.  Look for
  * all the etypes in (`etypes', `len'), stopping as soon as we find
@@ -125,8 +142,9 @@ is_default_salt_p(const krb5_salt *default_salt, const Key *key)
 krb5_error_code
 _kdc_find_etype(krb5_context context, krb5_boolean use_strongest_session_key,
 		krb5_boolean is_preauth, hdb_entry_ex *princ,
-		krb5_enctype *etypes, unsigned len,
-		krb5_enctype *ret_enctype, Key **ret_key)
+		krb5_principal request_princ, krb5_enctype *etypes, unsigned len,
+		krb5_enctype *ret_enctype, Key **ret_key,
+		krb5_boolean *ret_default_salt)
 {
     krb5_error_code ret;
     krb5_salt def_salt;
@@ -136,7 +154,7 @@ _kdc_find_etype(krb5_context context, krb5_boolean use_strongest_session_key,
     int i, k;
 
     /* We'll want to avoid keys with v4 salted keys in the pre-auth case... */
-    ret = krb5_get_pw_salt(context, princ->entry.principal, &def_salt);
+    ret = krb5_get_pw_salt(context, request_princ, &def_salt);
     if (ret)
 	return ret;
 
@@ -239,6 +257,8 @@ _kdc_find_etype(krb5_context context, krb5_boolean use_strongest_session_key,
 	    *ret_enctype = enctype;
 	if (ret_key != NULL)
 	    *ret_key = key;
+	if (ret_default_salt != NULL)
+	    *ret_default_salt = is_default_salt_p(&def_salt, key);
     }
 
     krb5_free_salt (context, def_salt);
@@ -248,18 +268,30 @@ _kdc_find_etype(krb5_context context, krb5_boolean use_strongest_session_key,
 krb5_error_code
 _kdc_make_anonymous_principalname (PrincipalName *pn)
 {
-    pn->name_type = KRB5_NT_PRINCIPAL;
-    pn->name_string.len = 1;
-    pn->name_string.val = malloc(sizeof(*pn->name_string.val));
+    pn->name_type = KRB5_NT_WELLKNOWN;
+    pn->name_string.len = 2;
+    pn->name_string.val = calloc(2, sizeof(*pn->name_string.val));
     if (pn->name_string.val == NULL)
-	return ENOMEM;
-    pn->name_string.val[0] = strdup("anonymous");
-    if (pn->name_string.val[0] == NULL) {
-	free(pn->name_string.val);
-	pn->name_string.val = NULL;
-	return ENOMEM;
-    }
+	goto failed;
+
+    pn->name_string.val[0] = strdup(KRB5_WELLKNOWN_NAME);
+    if (pn->name_string.val[0] == NULL)
+	goto failed;
+
+    pn->name_string.val[1] = strdup(KRB5_ANON_NAME);
+    if (pn->name_string.val[1] == NULL)
+	goto failed;
+
     return 0;
+
+failed:
+    free_PrincipalName(pn);
+
+    pn->name_type = KRB5_NT_UNKNOWN;
+    pn->name_string.len = 0;
+    pn->name_string.val = NULL;
+
+    return ENOMEM;
 }
 
 static void
@@ -422,7 +454,6 @@ static krb5_error_code
 pa_enc_chal_validate(kdc_request_t r, const PA_DATA *pa)
 {
     krb5_data pepper1, pepper2, ts_data;
-    KDC_REQ_BODY *b = &r->req.req_body;
     int invalidPassword = 0;
     EncryptedData enc_data;
     krb5_enctype aenctype;
@@ -433,7 +464,7 @@ pa_enc_chal_validate(kdc_request_t r, const PA_DATA *pa)
 
     heim_assert(r->armor_crypto != NULL, "ENC-CHAL called for non FAST");
     
-    if (_kdc_is_anon_request(b)) {
+    if (_kdc_is_anon_request(&r->req)) {
 	ret = KRB5KRB_AP_ERR_BAD_INTEGRITY;
 	kdc_log(r->context, r->config, 0, "ENC-CHALL doesn't support anon");
 	return ret;
@@ -582,12 +613,6 @@ pa_enc_ts_validate(kdc_request_t r, const PA_DATA *pa)
     Key *pa_key;
     char *str;
 	
-    if (_kdc_is_anon_request(&r->req.req_body)) {
-	ret = KRB5KRB_AP_ERR_BAD_INTEGRITY;
-	_kdc_set_e_text(r, "ENC-TS doesn't support anon");
-	goto out;
-    }
-
     ret = decode_EncryptedData(pa->padata_value.data,
 			       pa->padata_value.length,
 			       &enc_data,
@@ -1019,10 +1044,13 @@ older_enctype(krb5_enctype enctype)
  */
 
 static krb5_error_code
-make_etype_info_entry(krb5_context context, ETYPE_INFO_ENTRY *ent, Key *key)
+make_etype_info_entry(krb5_context context,
+		      ETYPE_INFO_ENTRY *ent,
+		      Key *key,
+		      krb5_boolean include_salt)
 {
     ent->etype = key->key.keytype;
-    if(key->salt){
+    if (key->salt && include_salt){
 #if 0
 	ALLOC(ent->salttype);
 
@@ -1069,7 +1097,8 @@ make_etype_info_entry(krb5_context context, ETYPE_INFO_ENTRY *ent, Key *key)
 static krb5_error_code
 get_pa_etype_info(krb5_context context,
 		  krb5_kdc_configuration *config,
-		  METHOD_DATA *md, Key *ckey)
+		  METHOD_DATA *md, Key *ckey,
+		  krb5_boolean include_salt)
 {
     krb5_error_code ret = 0;
     ETYPE_INFO pa;
@@ -1082,7 +1111,7 @@ get_pa_etype_info(krb5_context context,
     if(pa.val == NULL)
 	return ENOMEM;
 
-    ret = make_etype_info_entry(context, &pa.val[0], ckey);
+    ret = make_etype_info_entry(context, &pa.val[0], ckey, include_salt);
     if (ret) {
 	free_ETYPE_INFO(&pa);
 	return ret;
@@ -1130,12 +1159,14 @@ make_s2kparams(int value, size_t len, krb5_data **ps2kparams)
 }
 
 static krb5_error_code
-make_etype_info2_entry(ETYPE_INFO2_ENTRY *ent, Key *key)
+make_etype_info2_entry(ETYPE_INFO2_ENTRY *ent,
+		       Key *key,
+		       krb5_boolean include_salt)
 {
     krb5_error_code ret;
 
     ent->etype = key->key.keytype;
-    if(key->salt) {
+    if (key->salt && include_salt) {
 	ALLOC(ent->salt);
 	if (ent->salt == NULL)
 	    return ENOMEM;
@@ -1188,7 +1219,8 @@ make_etype_info2_entry(ETYPE_INFO2_ENTRY *ent, Key *key)
 static krb5_error_code
 get_pa_etype_info2(krb5_context context,
 		   krb5_kdc_configuration *config,
-		   METHOD_DATA *md, Key *ckey)
+		   METHOD_DATA *md, Key *ckey,
+		   krb5_boolean include_salt)
 {
     krb5_error_code ret = 0;
     ETYPE_INFO2 pa;
@@ -1200,7 +1232,7 @@ get_pa_etype_info2(krb5_context context,
     if(pa.val == NULL)
 	return ENOMEM;
 
-    ret = make_etype_info2_entry(&pa.val[0], ckey);
+    ret = make_etype_info2_entry(&pa.val[0], ckey, include_salt);
     if (ret) {
 	free_ETYPE_INFO2(&pa);
 	return ret;
@@ -1221,28 +1253,56 @@ get_pa_etype_info2(krb5_context context,
     return 0;
 }
 
+static int
+newer_enctype_present(struct KDC_REQ_BODY_etype *etype_list)
+{
+    size_t i;
+
+    for (i = 0; i < etype_list->len; i++) {
+	if (!older_enctype(etype_list->val[i]))
+	    return 1;
+    }
+    return 0;
+}
+
 static krb5_error_code
 get_pa_etype_info_both(krb5_context context,
 		       krb5_kdc_configuration *config,
-		       METHOD_DATA *md, Key *ckey)
+		       struct KDC_REQ_BODY_etype *etype_list,
+		       METHOD_DATA *md, Key *ckey,
+		       krb5_boolean include_salt)
 {
     krb5_error_code ret;
 
     /*
      * RFC4120 requires:
-     * - If the client only knows about old enctypes, then send
-     *   both info replies (we send 'info' first in the list).
-     * - If the client is 'modern', because it knows about 'new'
-     *   enctype types, then only send the 'info2' reply.
+     *   When the AS server is to include pre-authentication data in a
+     *   KRB-ERROR or in an AS-REP, it MUST use PA-ETYPE-INFO2, not
+     *   PA-ETYPE-INFO, if the etype field of the client's AS-REQ lists
+     *   at least one "newer" encryption type.  Otherwise (when the etype
+     *   field of the client's AS-REQ does not list any "newer" encryption
+     *   types), it MUST send both PA-ETYPE-INFO2 and PA-ETYPE-INFO (both
+     *   with an entry for each enctype).  A "newer" enctype is any enctype
+     *   first officially specified concurrently with or subsequent to the
+     *   issue of this RFC.  The enctypes DES, 3DES, or RC4 and any defined
+     *   in [RFC1510] are not "newer" enctypes.
+     *
+     * It goes on to state:
+     *   The preferred ordering of the "hint" pre-authentication data that
+     *   affect client key selection is: ETYPE-INFO2, followed by ETYPE-INFO,
+     *   followed by PW-SALT.  As noted in Section 3.1.3, a KDC MUST NOT send
+     *   ETYPE-INFO or PW-SALT when the client's AS-REQ includes at least one
+     *   "newer" etype.
      */
 
-    if (older_enctype(ckey->key.keytype)) {
-	ret = get_pa_etype_info(context, config, md, ckey);
-	if (ret)
-	    return ret;
-    }
+    ret = get_pa_etype_info2(context, config, md, ckey, include_salt);
+    if (ret)
+	return ret;
 
-    return get_pa_etype_info2(context, config, md, ckey);
+    if (!newer_enctype_present(etype_list))
+	ret = get_pa_etype_info(context, config, md, ckey, include_salt);
+
+    return ret;
 }
 
 /*
@@ -1392,7 +1452,7 @@ kdc_check_flags(krb5_context context,
 
 	if (server->flags.locked_out) {
 	    kdc_log(context, config, 0,
-		    "Client server locked out -- %s", server_name);
+		    "Server locked out -- %s", server_name);
 	    return KRB5KDC_ERR_POLICY;
 	}
 	if (server->flags.invalid) {
@@ -1438,7 +1498,7 @@ kdc_check_flags(krb5_context context,
 	    krb5_format_time(context, *server->pw_end,
 			     pwend_str, sizeof(pwend_str), TRUE);
 	    kdc_log(context, config, 0,
-		    "Server's key has expired at -- %s",
+		    "Server's key has expired at %s -- %s",
 		    pwend_str, server_name);
 	    return KRB5KDC_ERR_KEY_EXPIRED;
 	}
@@ -1491,6 +1551,24 @@ _kdc_check_addresses(krb5_context context,
     result = krb5_address_search(context, &addr, addresses);
     krb5_free_address (context, &addr);
     return result;
+}
+
+/*
+ *
+ */
+krb5_error_code
+_kdc_check_anon_policy (krb5_context context,
+			krb5_kdc_configuration *config,
+			hdb_entry_ex *client,
+			hdb_entry_ex *server)
+{
+    if (!config->allow_anonymous){
+	kdc_log(context, config, 0,
+		"Request for anonymous ticket denied by local policy");
+	return KRB5KDC_ERR_POLICY;
+    }
+
+    return 0;
 }
 
 /*
@@ -1567,15 +1645,9 @@ generate_pac(kdc_request_t r, Key *skey)
  */
 
 krb5_boolean
-_kdc_is_anonymous(krb5_context context, krb5_principal principal)
+_kdc_is_anonymous(krb5_context context, krb5_const_principal principal)
 {
-    if ((principal->name.name_type != KRB5_NT_WELLKNOWN &&
-	 principal->name.name_type != KRB5_NT_UNKNOWN) ||
-	principal->name.name_string.len != 2 ||
-	strcmp(principal->name.name_string.val[0], KRB5_WELLKNOWN_NAME) != 0 ||
-	strcmp(principal->name.name_string.val[1], KRB5_ANON_NAME) != 0)
-	return 0;
-    return 1;
+    return krb5_principal_is_anonymous(context, principal, KRB5_ANON_MATCH_ANY);
 }
 
 static int
@@ -1657,6 +1729,7 @@ _kdc_as_rep(kdc_request_t r,
     int i, flags = HDB_F_FOR_AS_REQ;
     METHOD_DATA error_method;
     const PA_DATA *pa;
+    krb5_boolean is_tgs;
 
     memset(&rep, 0, sizeof(rep));
     error_method.len = 0;
@@ -1715,21 +1788,16 @@ _kdc_as_rep(kdc_request_t r,
     kdc_log(context, config, 0, "AS-REQ %s from %s for %s",
 	    r->client_name, from, r->server_name);
 
+    is_tgs = krb5_principal_is_krbtgt(context, r->server_princ);
+
     /*
      *
      */
 
-    if (_kdc_is_anonymous(context, r->client_princ)) {
-	if (!_kdc_is_anon_request(b)) {
-	    kdc_log(context, config, 0, "Anonymous ticket w/o anonymous flag");
-	    ret = KRB5KDC_ERR_C_PRINCIPAL_UNKNOWN;
-	    goto out;
-	}
-    } else if (_kdc_is_anon_request(b)) {
-	kdc_log(context, config, 0,
-		"Request for a anonymous ticket with non "
-		"anonymous client name: %s", r->client_name);
-	ret = KRB5KDC_ERR_C_PRINCIPAL_UNKNOWN;
+    if (_kdc_is_anonymous(context, r->client_princ) &&
+	!_kdc_is_anon_request(&r->req)) {
+	kdc_log(context, config, 0, "Anonymous client w/o anonymous flag");
+	ret = KRB5KDC_ERR_BADOPTION;
 	goto out;
     }
 
@@ -1777,7 +1845,7 @@ _kdc_as_rep(kdc_request_t r,
 	goto out;
     }
     ret = _kdc_db_fetch(context, config, r->server_princ,
-			HDB_F_GET_SERVER|HDB_F_GET_KRBTGT | flags,
+			HDB_F_GET_SERVER | flags | (is_tgs ? HDB_F_GET_KRBTGT : 0),
 			NULL, NULL, &r->server);
     if(ret == HDB_ERR_NOT_FOUND_HERE) {
 	kdc_log(context, config, 5, "target %s does not have secrets at this KDC, need to proxy",
@@ -1803,11 +1871,11 @@ _kdc_as_rep(kdc_request_t r,
      */
 
     ret = _kdc_find_etype(context,
-			  krb5_principal_is_krbtgt(context, r->server_princ) ?
-			  config->tgt_use_strongest_session_key :
-			  config->svc_use_strongest_session_key, FALSE,
-			  r->client, b->etype.val, b->etype.len, &r->sessionetype,
-			  NULL);
+			  is_tgs ? config->tgt_use_strongest_session_key
+				 : config->svc_use_strongest_session_key,
+			  FALSE, r->client, r->client_princ,
+			  b->etype.val, b->etype.len,
+			  &r->sessionetype, NULL, NULL);
     if (ret) {
 	kdc_log(context, config, 0,
 		"Client (%s) from %s has no common enctypes with KDC "
@@ -1842,16 +1910,18 @@ _kdc_as_rep(kdc_request_t r,
 		if (ret != 0) {
 		    krb5_error_code  ret2;
 		    Key *ckey = NULL;
+		    krb5_boolean default_salt;
+
 		    /*
 		     * If there is a client key, send ETYPE_INFO{,2}
 		     */
 		    ret2 = _kdc_find_etype(context,
 					   config->preauth_use_strongest_session_key,
-					   TRUE, r->client, b->etype.val,
-					   b->etype.len, NULL, &ckey);
+					   TRUE, r->client, r->client_princ, b->etype.val,
+					   b->etype.len, NULL, &ckey, &default_salt);
 		    if (ret2 == 0) {
-			ret2 = get_pa_etype_info_both(context, config,
-						      &error_method, ckey);
+			ret2 = get_pa_etype_info_both(context, config, &b->etype,
+						      &error_method, ckey, !default_salt);
 			if (ret2 != 0)
 			    ret = ret2;
 		    }
@@ -1869,6 +1939,7 @@ _kdc_as_rep(kdc_request_t r,
     if (found_pa == 0) {
 	Key *ckey = NULL;
 	size_t n;
+	krb5_boolean default_salt;
 
 	for (n = 0; n < sizeof(pat) / sizeof(pat[0]); n++) {
 	    if ((pat[n].flags & PA_ANNOUNCE) == 0)
@@ -1884,9 +1955,12 @@ _kdc_as_rep(kdc_request_t r,
 	 */
 	ret = _kdc_find_etype(context,
 			      config->preauth_use_strongest_session_key, TRUE,
-			      r->client, b->etype.val, b->etype.len, NULL, &ckey);
+			      r->client, r->client_princ,
+			      b->etype.val, b->etype.len, NULL,
+			      &ckey, &default_salt);
 	if (ret == 0) {
-	    ret = get_pa_etype_info_both(context, config, &error_method, ckey);
+	    ret = get_pa_etype_info_both(context, config, &b->etype,
+					 &error_method, ckey, !default_salt);
 	    if (ret)
 		goto out;
 	}
@@ -1895,7 +1969,7 @@ _kdc_as_rep(kdc_request_t r,
 	 * send requre preauth is its required or anon is requested,
 	 * anon is today only allowed via preauth mechanisms.
 	 */
-	if (require_preauth_p(r) || _kdc_is_anon_request(b)) {
+	if (require_preauth_p(r) || _kdc_is_anon_request(&r->req)) {
 	    ret = KRB5KDC_ERR_PREAUTH_REQUIRED;
 	    _kdc_set_e_text(r, "Need to use PA-ENC-TIMESTAMP/PA-PK-AS-REQ");
 	    goto out;
@@ -1928,6 +2002,16 @@ _kdc_as_rep(kdc_request_t r,
     if(ret)
 	goto out;
 
+    if (_kdc_is_anon_request(&r->req)) {
+	ret = _kdc_check_anon_policy(context, config, r->client, r->server);
+	if (ret) {
+	    _kdc_set_e_text(r, "Anonymous ticket requests are disabled");
+	    goto out;
+	}
+
+	r->et.flags.anonymous = 1;
+    }
+
     /*
      * Select the best encryption type for the KDC with out regard to
      * the client since the client never needs to read that data.
@@ -1939,8 +2023,7 @@ _kdc_as_rep(kdc_request_t r,
     if(ret)
 	goto out;
 
-    if(f.renew || f.validate || f.proxy || f.forwarded || f.enc_tkt_in_skey
-       || (_kdc_is_anon_request(b) && !config->allow_anonymous)) {
+    if(f.renew || f.validate || f.proxy || f.forwarded || f.enc_tkt_in_skey) {
 	ret = KRB5KDC_ERR_BADOPTION;
 	_kdc_set_e_text(r, "Bad KDC options");
 	goto out;
@@ -1953,23 +2036,38 @@ _kdc_as_rep(kdc_request_t r,
     rep.pvno = 5;
     rep.msg_type = krb_as_rep;
 
-    if (_kdc_is_anonymous(context, r->client_princ)) {
-	Realm anon_realm=KRB5_ANON_REALM;
+    if (!config->historical_anon_realm &&
+        _kdc_is_anonymous(context, r->client_princ)) {
+	Realm anon_realm = KRB5_ANON_REALM;
 	ret = copy_Realm(&anon_realm, &rep.crealm);
-    } else
+    } else if (f.canonicalize || r->client->entry.flags.force_canonicalize)
 	ret = copy_Realm(&r->client->entry.principal->realm, &rep.crealm);
+    else
+	ret = copy_Realm(&r->client_princ->realm, &rep.crealm);
     if (ret)
 	goto out;
-    ret = _krb5_principal2principalname(&rep.cname, r->client->entry.principal);
+    if (r->et.flags.anonymous)
+	ret = _kdc_make_anonymous_principalname(&rep.cname);
+    else if (f.canonicalize || r->client->entry.flags.force_canonicalize)
+	ret = _krb5_principal2principalname(&rep.cname, r->client->entry.principal);
+    else
+	ret = _krb5_principal2principalname(&rep.cname, r->client_princ);
     if (ret)
 	goto out;
 
     rep.ticket.tkt_vno = 5;
-    ret = copy_Realm(&r->server->entry.principal->realm, &rep.ticket.realm);
+    if (f.canonicalize || r->server->entry.flags.force_canonicalize)
+	ret = copy_Realm(&r->server->entry.principal->realm, &rep.ticket.realm);
+    else
+	ret = copy_Realm(&r->server_princ->realm, &rep.ticket.realm);
     if (ret)
 	goto out;
-    _krb5_principal2principalname(&rep.ticket.sname,
-				  r->server->entry.principal);
+    if (f.canonicalize || r->server->entry.flags.force_canonicalize)
+	_krb5_principal2principalname(&rep.ticket.sname,
+				      r->server->entry.principal);
+    else
+	_krb5_principal2principalname(&rep.ticket.sname,
+				      r->server_princ);
     /* java 1.6 expects the name to be the same type, lets allow that
      * uncomplicated name-types. */
 #define CNT(sp,t) (((sp)->sname->name_type) == KRB5_NT_##t)
@@ -1980,11 +2078,6 @@ _kdc_as_rep(kdc_request_t r,
     r->et.flags.initial = 1;
     if(r->client->entry.flags.forwardable && r->server->entry.flags.forwardable)
 	r->et.flags.forwardable = f.forwardable;
-    else if (f.forwardable) {
-	_kdc_set_e_text(r, "Ticket may not be forwardable");
-	ret = KRB5KDC_ERR_POLICY;
-	goto out;
-    }
     if(r->client->entry.flags.proxiable && r->server->entry.flags.proxiable)
 	r->et.flags.proxiable = f.proxiable;
     else if (f.proxiable) {
@@ -2064,9 +2157,6 @@ _kdc_as_rep(kdc_request_t r,
 	    r->et.flags.renewable = 1;
 	}
     }
-
-    if (_kdc_is_anon_request(b))
-	r->et.flags.anonymous = 1;
 
     if(b->addresses){
 	ALLOC(r->et.caddr);
@@ -2180,24 +2270,34 @@ _kdc_as_rep(kdc_request_t r,
     }
 
     /* Add the PAC */
-    if (send_pac_p(context, req)) {
+    if (send_pac_p(context, req) && !r->et.flags.anonymous) {
 	generate_pac(r, skey);
     }
 
     _kdc_log_timestamp(context, config, "AS-REQ", r->et.authtime, r->et.starttime,
 		       r->et.endtime, r->et.renew_till);
 
-    /* do this as the last thing since this signs the EncTicketPart */
-    ret = _kdc_add_KRB5SignedPath(context,
-				  config,
-				  r->server,
-				  setype,
-				  r->client->entry.principal,
-				  NULL,
-				  NULL,
-				  &r->et);
-    if (ret)
-	goto out;
+    {
+	krb5_principal client_principal;
+
+	ret = _krb5_principalname2krb5_principal(context, &client_principal,
+						 rep.cname, rep.crealm);
+	if (ret)
+	    goto out;
+
+	/* do this as the last thing since this signs the EncTicketPart */
+	ret = _kdc_add_KRB5SignedPath(context,
+				      config,
+				      r->server,
+				      setype,
+				      client_principal,
+				      NULL,
+				      NULL,
+				      &r->et);
+	krb5_free_principal(context, client_principal);
+	if (ret)
+	    goto out;
+    }
 
     log_as_req(context, config, r->reply_key.keytype, setype, b);
 
@@ -2364,15 +2464,4 @@ _kdc_tkt_add_if_relevant_ad(krb5_context context,
     }
 
     return 0;
-}
-
-krb5_boolean
-_kdc_is_anon_request(const KDC_REQ_BODY *b)
-{
-	/* some versions of heimdal use bit 14 instead of 16 for
-	   request_anonymous, as indicated in the anonymous draft prior to
-	   version 11. Bit 14 is assigned to S4U2Proxy, but all S4U2Proxy
-	   requests will have a second ticket; don't consider those anonymous */
-	return (b->kdc_options.request_anonymous ||
-		(b->kdc_options.constrained_delegation && !b->additional_tickets));
 }

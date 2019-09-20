@@ -254,8 +254,12 @@ _krb5_erase_file(krb5_context context, const char *filename)
     int ret;
 
     ret = lstat (filename, &sb1);
-    if (ret < 0)
-	return errno;
+    if (ret < 0) {
+	if(errno == ENOENT)
+	    return 0;
+	else
+	    return errno;
+    }
 
     fd = open(filename, O_RDWR | O_BINARY | O_CLOEXEC | O_NOFOLLOW);
     if(fd < 0) {
@@ -541,6 +545,8 @@ fcc_initialize(krb5_context context,
     {
 	krb5_storage *sp;
 	sp = krb5_storage_emem();
+	if (sp == NULL)
+	    return krb5_enomem(context);
 	krb5_storage_set_eof_code(sp, KRB5_CC_END);
 	if(context->fcache_vno != 0)
 	    f->version = context->fcache_vno;
@@ -625,6 +631,8 @@ fcc_store_cred(krb5_context context,
 	krb5_storage *sp;
 
 	sp = krb5_storage_emem();
+	if (sp == NULL)
+	    return krb5_enomem(context);
 	krb5_storage_set_eof_code(sp, KRB5_CC_END);
 	storage_set_flags(context, sp, FCACHE(id)->version);
 	ret = krb5_store_creds(sp, creds);
