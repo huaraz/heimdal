@@ -82,6 +82,7 @@ EXPORTS
 	krb5_cc_cache_next
 	krb5_cc_clear_mcred
 	krb5_cc_close
+	krb5_cc_configured_default_name
 	krb5_cc_copy_cache
 	krb5_cc_copy_creds      ;!
 	krb5_cc_copy_match_f
@@ -437,13 +438,29 @@ EXPORTS
 	krb5_kt_resolve
 	krb5_kt_start_seq_get
 	krb5_kuserok
+	krb5_kx509
+        krb5_kx509_ctx_add_eku
+        krb5_kx509_ctx_add_san_dns_name
+        krb5_kx509_ctx_add_san_ms_upn
+        krb5_kx509_ctx_add_san_pkinit
+        krb5_kx509_ctx_add_san_registeredID
+        krb5_kx509_ctx_add_san_rfc822Name
+        krb5_kx509_ctx_add_san_xmpp
+	krb5_kx509_ctx_free
+	krb5_kx509_ctx_init
+	krb5_kx509_ctx_set_csr_der
+	krb5_kx509_ctx_set_key
+	krb5_kx509_ctx_set_realm
+	krb5_kx509_ext
 	krb5_log
 	krb5_log_msg
 	krb5_make_addrport
 	krb5_make_principal
 	krb5_max_sockaddr_size
+	krb5_mk_1cred
 	krb5_mk_error
 	krb5_mk_error_ext
+	krb5_mk_ncred
 	krb5_mk_priv
 	krb5_mk_rep
 	krb5_mk_req
@@ -662,6 +679,7 @@ EXPORTS
 	krb5_ticket_get_authorization_data_type
 	krb5_ticket_get_client
 	krb5_ticket_get_endtime
+	krb5_ticket_get_times
 	krb5_ticket_get_server
 	krb5_timeofday
 	krb5_unparse_name

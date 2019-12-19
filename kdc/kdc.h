@@ -43,6 +43,7 @@
 
 #include <hdb.h>
 #include <krb5.h>
+#include <kx509_asn1.h>
 
 enum krb5_kdc_trpolicy {
     TRPOLICY_ALWAYS_CHECK,
@@ -93,26 +94,24 @@ typedef struct krb5_kdc_configuration {
     size_t max_datagram_reply_length;
 
     int enable_kx509;
-    const char *kx509_template;
-    const char *kx509_ca;
 
     krb5_boolean enable_derived_keys;
     int derived_keys_ndots;
+    int derived_keys_maxdots;
 
+    const char *app;
 } krb5_kdc_configuration;
+
+typedef struct kdc_request_desc *kdc_request_t;
+typedef struct astgs_request_desc *astgs_request_t;
+typedef struct kx509_req_context_desc *kx509_req_context;
 
 struct krb5_kdc_service {
     unsigned int flags;
 #define KS_KRB5		1
 #define KS_NO_LENGTH	2
-    krb5_error_code (*process)(krb5_context context,
-			       krb5_kdc_configuration *config,
-			       krb5_data *req_buffer,
-			       krb5_data *reply,
-			       const char *from,
-			       struct sockaddr *addr,
-			       int datagram_reply,
-			       int *claim);
+    const char *name;
+    krb5_error_code (*process)(kdc_request_t *, int *claim);
 };
 
 #include <kdc-protos.h>

@@ -87,7 +87,8 @@ path: STRING
 .Li STRINGs
 consists of one or more non-whitespace characters.
 .Pp
-Files and directories may be included by absolute path.  Including a
+Files and directories may be included by absolute path, with percent
+token expansion (see the TOKEN EXPANSION section).  Including a
 directory causes all files in the directory to be included as if each
 file had been included separately, but only files whose names consist of
 alphanumeric, hyphen, and underscore are included, though they may also
@@ -161,6 +162,19 @@ If a principal argument is specified, it is used as an explicit realm name for
 anonymous pkinit even without an
 .Li @
 prefix.
+.It Li delegate-destination-tgt = Va boolean
+When forwarding credentials to a remote host, forward a TGT for the
+realm of the destination host rather than a TGT for the user's realm.
+This is useful when hosts in the remote realm should not or cannot
+(e.g. firewalled from user realm's KDC) obtain tickets for services
+in the user's realm. When the user's realm and the host's realm are
+the same, this parameter has no effect.  The setting can be applied
+to a single realm as follows:
+.Bd -literal -offset indent
+EXAMPLE.COM = {
+	delegate-destination-tgt = true
+}
+.Ed
 .El
 .It Li [libdefaults]
 .Bl -tag -width "xxx" -offset indent
@@ -193,10 +207,8 @@ sets the default credentials type.
 the default credentials cache name.
 If you want to change the type only use
 .Li default_cc_type .
-The string can contain variables that are expanded on runtime.
-The Only supported variable currently is
-.Li %{uid}
-which expands to the current user id.
+The string can contain variables that are expanded at runtime. See the TOKEN
+EXPANSION section.
 .It Li default_etypes = Va etypes ...
 A list of default encryption types to use. (Default: all enctypes if
 allow_weak_crypto = TRUE, else all enctypes except single DES enctypes.)
@@ -211,10 +223,25 @@ A list of default encryption types to use when requesting a DES credential.
 .It Li default_keytab_name = Va keytab
 The keytab to use if no other is specified, default is
 .Dq FILE:/etc/krb5.keytab .
+.It Li default_client_keytab_name = Va keytab
+The keytab to use for client credential acquisition if no other is
+specified, default is
+.Dq FILE:%{LOCALSTATEDIR}/user/%{euid}/client.keytab .
+See the TOKEN EXPANSION section.
 .It Li dns_lookup_kdc = Va boolean
 Use DNS SRV records to lookup KDC services location.
 .It Li dns_lookup_realm = Va boolean
 Use DNS TXT records to lookup domain to realm mappings.
+.It Li enforce_ok_as_delegate = Va boolean
+If this flag to true, GSSAPI credential delegation will be
+disabled when the 
+.Ar ok-as-delegate
+flag is not set in the service ticket.
+If this flag is false, the 
+.Ar ok-as-delegate
+ticket flag is only enforced when an application specifically
+requests enforcement.
+The default value is false.
 .It Li kdc_timesync = Va boolean
 Try to keep track of the time differential between the local machine
 and the KDC, and then compensate for that when issuing requests.
@@ -277,7 +304,8 @@ this is very useful when the GSS-API server input the
 wrong server name into the gss_accept_sec_context call.
 .It Li k5login_directory = Va directory
 Alternative location for user .k5login files. This option is provided
-for compatibility with MIT krb5 configuration files.
+for compatibility with MIT krb5 configuration files. This path is
+subject to percent token expansion (see TOKEN EXPANSION).
 .It Li k5login_authoritative = Va boolean
 If true then if a principal is not found in k5login files then
 .Xr krb5_userok 3
@@ -337,6 +365,28 @@ be allowed to run.
 .It Li fcache_strict_checking
 strict checking in FILE credential caches that owner, no symlink and
 permissions is correct.
+.It Li enable-kx509 = Va boolean
+Enable use of kx509 so that every TGT that can has a corresponding
+PKIX certificate.  Default: false.
+.It Li kx509_gen_key_type = Va public-key-type
+Type of public key for kx509 private key generation.  Defaults to
+.Va rsa
+and currently only
+.Va rsa
+is supported.
+.It Li kx509_gen_rsa_key_size = Va number-of-bits
+RSA key size for kx509.  Defaults to 2048.
+.It Li kx509_store = path
+A file path into which to write a certificate obtained with
+kx509, and its private key, when attempting kx509 optimistically
+using credentials from a default ccache.  Tokens will be
+expanded.
+.It Li kx509_hostname = Va hostname
+If set, then the kx509 client will use this hostname for the
+kx509 service.  This can also be set in the
+.Li [realm]
+section on a per-realm basis.  If not set then a TGS name will be
+used.
 .It Li name_canon_rules = Va rules
 One or more service principal name canonicalization rules.  Each rule
 consists of one or more tokens separated by colon (':').  Currently
@@ -701,26 +751,110 @@ Should the kdc answer digest requests. The default is FALSE.
 .It Li digests_allowed = Va list of digests
 Specifies the digests the kdc will reply to. The default is
 .Li ntlm-v2 .
-.It Li kx509_ca = Va file
-Specifies the PEM credentials for the kx509 certification authority.
+.It Li enable-kx509 = Va boolean
+Enables kx509 service.
+.Pp
+The kx509 service is configurable for a number of cases:
+.Bl -tag -width "" -offset indent
+.It Li default certificates for user or service principals,
+.It Li non-default certificate requests including subject alternative names (SAN) and extended key usage (EKU) certificate extensions, for either client, server, or mixed usage.
+.El
+.Pp
+Distinct configurations are supported for all of these cases as
+shown below:
+.Bd -literal -offset indent
+[kdc]
+    enable-kx509 = yes | no
+    require_csr  = yes | no
+    require_initial_kca_tickets = yes | no
+    realm = {
+        <REALM> = {
+            kx509 = {
+                <label> = {
+                    <param> = <value>
+                }
+                hostbased_service = {
+                    <service> = {
+                        <param> = <value>
+                    }
+                }
+            }
+        }
+    }
+.Ed
+where
+.Va label
+is one of:
+.Bl -tag -width "xxx" -offset indent
+.It Li user
+for default certificates for user principals,
+.It Li root_user
+for default certificates for root user principals,
+.It Li admin_user
+for default certificates for admin user principals,
+.It Li hostbased_service
+for default certificates for host-based service principals, in which case the
+service name is used as shown above,
+.It Li client
+for non-default client certificates,
+.It Li server
+for non-default server certificates,
+.It Li mixed
+for non-default client and server certificates.
+.El
+and where the parameters are as follows:
+.Bl -tag -width "xxx" -offset indent
+.It Li ca = Va file
+Specifies the PEM credentials for the kx509 certification
+authority.  If not specified for any specific use-case, then that
+use-case will be disabled.
 .It Li require_initial_kca_tickets = Va boolean
 Specified whether to require that tickets for the
 .Li kca_service
 service principal be INITIAL.
 This may be set on a per-realm basis as well as globally.
 Defaults to true for the global setting.
-.It Li kx509_include_pkinit_san = Va boolean
+.It Li include_pkinit_san = Va boolean
 If true then the kx509 client principal's name and realm will be
 included in an
 .Li id-pkinit-san
-certificate extension.
+subject alternative name certificate extension.
 This can be set on a per-realm basis as well as globally.
 Defaults to true for the global setting.
-.It Li kx509_template = Va file
-Specifies the PEM file with a template for the certificates to be
-issued.
-The following variables can be interpolated in the subject name using
-${variable} syntax:
+.It Li email_domain = Va domain
+If set then the kx509 client user principal's name at the given
+domain will be included in an
+.Li rfc822Name
+subject alternative name certificate extension.
+This can be set on a per-realm basis as well as globally.
+Defaults to false for the global setting.
+.It Li include_dnsname_san = Va boolean
+If true then a kx509 host-based or domain-based client
+principal's hostname will be included in an
+.Li dNSName
+subject alternative name certificate extension, with the
+downcased realm as the domainname.  This can be set on a
+per-realm basis as well as
+globally.  Defaults to false for the global setting.
+.It Li ekus = Va OID
+List of OIDs to include as EKUs.
+.It Li subject_name = Va DN
+Specifies a subject name that should either be empty or contain
+variable interpolation as described below for
+.Va template_cert .
+The subject may be the empty string, causing the issued
+certificates' subject names to be empty.
+.It Li template_cert = Va store
+Specifies the hx509 store (e.g.,
+.Va PEM-FILE:path )
+with a template
+for the certificates to be issued to kx509 clients whose
+principal names have one component (i.e., are user principals).
+A template is a certificate with variables to be interpolated in
+the subjectName.  The following variables can be interpolated in
+the subject name using
+.Va ${variable}
+syntax:
 .Bl -tag -width "xxx" -offset indent
 .It principal-name
 The full name of the kx509 client principal.
@@ -728,15 +862,47 @@ The full name of the kx509 client principal.
 The full name of the kx509 client principal, excluding the realm name.
 .It principal-name-realm
 The name of the client principal's realm.
+.It principal-component0
+The first component of the client principal.
+.It principal-component1
+The second component of the client principal.
+.It principal-component2
+The third component of the client principal.
+.It principal-service-name
+The name of the service.
+.It principal-host-name
+The name of the host.
 .El
+.Pp
+If a template and subject name are not specified and no default
+SANs are configured, then no certificate will be issued.
+Otherwise if a template and subject name are not specified, then
+subject of the certificate will be empty.
 .El
-The 
-.Li kx509 ,
-.Li kx509_template ,
-.Li kx509_include_pkinit_san ,
-and
-.Li require_initial_kca_tickets
-parameters may be set on a per-realm basis as well.
+.It Li enable_derived_keys = Va boolean
+Enable the use of derived key namespaces.
+When enabled, principals of the form
+.Pp
+.Ar WELLKNOWN/DERIVED-KEY/<alg>/<namespace>@REALM
+.Pp
+match any request of the form:
+.Ar */*.<namespace>@REALM .
+The keys are derived from the keys in the database and
+the name of the requested principal via the algorithm
+specified by
+.Ar <alg> .
+Currently, only
+.Ar KRB5-CRYPTO-PRFPLUS
+which is implemented by the function
+.Fn krb5_crypto_prfplus .
+.It Li derived_keys_ndots = Va Integer
+The minimum number of dots in a name matched via
+derived key namespaces.
+.It Li derived_keys_maxdots = Va Integer
+The maximim number of dots in a name matched via
+derived key namespaces.
+.El
+.Pp
 .It Li [kadmin]
 .Bl -tag -width "xxx" -offset indent
 .It Li password_lifetime = Va time
@@ -796,6 +962,60 @@ List of policy names to apply to the password. Builtin policies are
 among other minimum-length, character-class, external-check.
 .El
 .El
+.El
+.Sh TOKEN EXPANSION
+The values of some parameters are subject to percent token expansion.
+Expansions supported on all platforms:
+.Bl -tag -width "xxx" -offset indent
+.It %{LIBDIR}
+The install location of Heimdal libraries.
+.It %{BINDIR}
+The install location of Heimdal user programs.
+.It %{LIBEXEC}
+The install location of Heimdal services.
+.It %{SBINDIR}
+The install location of Heimdal admin programs.
+.It %{username}
+The current username.
+.It %{TEMP}
+A temporary directory.
+.It %{USERID}
+The current user's SID (Windows) or effective user ID (POSIX).
+.It %{uid}
+The current user's SID (Windows) or real user ID (POSIX).  On POSIX it is best
+to use the
+.Va %{euid}
+token instead (see below).
+.It %{null}
+The empty string.
+.El
+.Pp
+Expansions supported on POSIX-like platforms:
+.Bl -tag -width "xxx" -offset indent
+.It %{euid}
+The current effective user ID.
+.It %{loginname}
+The username of the logged-in user for this terminal.
+.It %{LOCALSTATEDIR}
+The install location of Heimdal databases.
+.El
+.Pp
+On Windows, several additional tokens can also be expanded:
+.Bl -tag -width "xxx" -offset indent
+.It %{APPDATA}
+Roaming application data (for current user).
+.It %{COMMON_APPDATA}
+Application data (all users).
+.It %{LOCAL_APPDATA}
+Local application data (for current user).
+.It %{SYSTEM}
+Windows System folder.
+.It %{WINDOWS}
+Windows folder.
+.It %{USERCONFIG}
+Per user Heimdal configuration file path.
+.It %{COMMONCONFIG}
+Common Heimdal configuration file path.
 .El
 .Sh ENVIRONMENT
 .Ev KRB5_CONFIG

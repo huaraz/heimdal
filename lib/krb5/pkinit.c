@@ -719,7 +719,7 @@ pk_mk_padata(krb5_context context,
 	free(buf.data);
 
     if (ret == 0)
-    	krb5_padata_add(context, md, KRB5_PADATA_PK_AS_09_BINDING, NULL, 0);
+    	ret = krb5_padata_add(context, md, KRB5_PADATA_PK_AS_09_BINDING, NULL, 0);
 
  out:
     free_ContentInfo(&content_info);
@@ -1091,6 +1091,7 @@ pk_rd_pa_reply_enckey(krb5_context context,
     krb5_error_code ret;
     struct krb5_pk_cert *host = NULL;
     krb5_data content;
+    heim_octet_string unwrapped;
     heim_oid contentType = { 0, NULL };
     int flags = HX509_CMS_UE_DONT_REQUIRE_KU_ENCIPHERMENT;
 
@@ -1122,9 +1123,8 @@ pk_rd_pa_reply_enckey(krb5_context context,
     /* win2k uses ContentInfo */
     if (type == PKINIT_WIN2K) {
 	heim_oid type2;
-	heim_octet_string out;
 
-	ret = hx509_cms_unwrap_ContentInfo(&content, &type2, &out, NULL);
+	ret = hx509_cms_unwrap_ContentInfo(&content, &type2, &unwrapped, NULL);
 	if (ret) {
 	    /* windows LH with interesting CMS packets */
 	    size_t ph = 1 + der_length_len(content.length);
@@ -1143,7 +1143,7 @@ pk_rd_pa_reply_enckey(krb5_context context,
 	    content.data = ptr;
 	    content.length += ph;
 
-	    ret = hx509_cms_unwrap_ContentInfo(&content, &type2, &out, NULL);
+	    ret = hx509_cms_unwrap_ContentInfo(&content, &type2, &unwrapped, NULL);
 	    if (ret)
 		goto out;
 	}
@@ -1152,13 +1152,13 @@ pk_rd_pa_reply_enckey(krb5_context context,
 	    krb5_set_error_message(context, ret,
 				   N_("PKINIT: Invalid content type", ""));
 	    der_free_oid(&type2);
-	    der_free_octet_string(&out);
+	    der_free_octet_string(&unwrapped);
 	    goto out;
 	}
 	der_free_oid(&type2);
 	krb5_data_free(&content);
-	ret = krb5_data_copy(&content, out.data, out.length);
-	der_free_octet_string(&out);
+	ret = krb5_data_copy(&content, unwrapped.data, unwrapped.length);
+	der_free_octet_string(&unwrapped);
 	if (ret) {
 	    krb5_set_error_message(context, ret,
 				   N_("malloc: out of memory", ""));
@@ -1171,10 +1171,13 @@ pk_rd_pa_reply_enckey(krb5_context context,
 			 content.length,
 			 ctx->id,
 			 &contentType,
-			 &content,
+			 &unwrapped,
 			 &host);
     if (ret)
 	goto out;
+    krb5_data_free(&content);
+    ret = krb5_data_copy(&content, unwrapped.data, unwrapped.length);
+    der_free_octet_string(&unwrapped);
 
     /* make sure that it is the kdc's certificate */
     ret = pk_verify_host(context, realm, hi, ctx, host);
@@ -1887,7 +1890,7 @@ _krb5_pk_load_id(krb5_context context,
 				 NULL, *chain_list);
 	if (ret) {
 	    pk_copy_error(context, context->hx509ctx, ret,
-			  "Failed to laod chain %s",
+			  "Failed to load chain %s",
 			  *chain_list);
 	    goto out;
 	}
@@ -2326,6 +2329,8 @@ krb5_get_init_creds_opt_set_pkinit(krb5_context context,
 {
 #ifdef PKINIT
     krb5_error_code ret;
+    char **freeme1 = NULL;
+    char **freeme2 = NULL;
     char *anchors = NULL;
 
     if (opt->opt_private == NULL) {
@@ -2345,16 +2350,13 @@ krb5_get_init_creds_opt_set_pkinit(krb5_context context,
 
     /* XXX implement krb5_appdefault_strings  */
     if (pool == NULL)
-	pool = krb5_config_get_strings(context, NULL,
-				       "appdefaults",
-				       "pkinit_pool",
-				       NULL);
+        pool = freeme1 = krb5_config_get_strings(context, NULL, "appdefaults",
+                                                 "pkinit_pool", NULL);
 
     if (pki_revoke == NULL)
-	pki_revoke = krb5_config_get_strings(context, NULL,
-					     "appdefaults",
-					     "pkinit_revoke",
-					     NULL);
+        pki_revoke = freeme2 = krb5_config_get_strings(context, NULL,
+                                                       "appdefaults",
+                                                       "pkinit_revoke", NULL);
 
     if (x509_anchors == NULL) {
 	krb5_appdefault_string(context, "kinit",
@@ -2375,6 +2377,9 @@ krb5_get_init_creds_opt_set_pkinit(krb5_context context,
 			   prompter,
 			   prompter_data,
 			   password);
+    krb5_config_free_strings(freeme2);
+    krb5_config_free_strings(freeme1);
+    free(anchors);
     if (ret) {
 	free(opt->opt_private->pk_init_ctx);
 	opt->opt_private->pk_init_ctx = NULL;
@@ -2387,10 +2392,15 @@ krb5_get_init_creds_opt_set_pkinit(krb5_context context,
 	opt->opt_private->pk_init_ctx->id->flags |= PKINIT_BTMM;
 
     if (opt->opt_private->pk_init_ctx->id->certs) {
-	_krb5_pk_set_user_id(context,
-			     principal,
-			     opt->opt_private->pk_init_ctx,
-			     opt->opt_private->pk_init_ctx->id->certs);
+        ret = _krb5_pk_set_user_id(context,
+                                   principal,
+                                   opt->opt_private->pk_init_ctx,
+                                   opt->opt_private->pk_init_ctx->id->certs);
+        if (ret) {
+            free(opt->opt_private->pk_init_ctx);
+            opt->opt_private->pk_init_ctx = NULL;
+            return ret;
+        }
     } else
 	opt->opt_private->pk_init_ctx->id->cert = NULL;
 
@@ -2449,9 +2459,7 @@ krb5_get_init_creds_opt_set_pkinit_user_certs(krb5_context context,
 	return EINVAL;
     }
 
-    _krb5_pk_set_user_id(context, NULL, opt->opt_private->pk_init_ctx, certs);
-
-    return 0;
+    return _krb5_pk_set_user_id(context, NULL, opt->opt_private->pk_init_ctx, certs);
 #else
     krb5_set_error_message(context, EINVAL,
 			   N_("no support for PKINIT compiled in", ""));

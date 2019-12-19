@@ -83,8 +83,10 @@ HEIMDAL_ROKEN_2.0 {
 		rk_inet_pton;
 		rk_injectauxv;
 		rk_localtime_r;
+		rk_memmem;
 		rk_memset_s;
 		rk_mkdir;
+		rk_mkostemp;
 		rk_mkstemp;
 		rk_parse_flags;
 		rk_parse_time;
@@ -182,6 +184,7 @@ HEIMDAL_ROKEN_2.0 {
 		roken_get_homedir;
 		roken_get_shell;
 		roken_get_username;
+		roken_get_loginname;
 		roken_mconcat;
 		roken_vconcat;
 		roken_vmconcat;

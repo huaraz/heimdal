@@ -41,26 +41,56 @@
 #include "headers.h"
 
 typedef struct pk_client_params pk_client_params;
-struct DigestREQ;
-struct Kx509Request;
-typedef struct kdc_request_desc *kdc_request_t;
 
 #include <kdc-private.h>
 
 #define FAST_EXPIRATION_TIME (3 * 60)
 
+#define KDC_AUDIT_EATWHITE	0x1
+#define KDC_AUDIT_VIS		0x2
+#define KDC_AUDIT_VISLAST	0x4
+
+/* KFE == KDC_FIND_ETYPE */
+#define KFE_IS_TGS	0x1
+#define KFE_IS_PREAUTH	0x2
+#define KFE_USE_CLIENT	0x4
+
+#define KDC_REQUEST_DESC_COMMON_ELEMENTS			\
+    /* Input */							\
+    krb5_context context;					\
+    krb5_kdc_configuration *config;				\
+    const char *from;						\
+    struct sockaddr *addr;					\
+    int datagram_reply;						\
+    krb5_data request;						\
+								\
+    /* Output */						\
+    krb5_data *reply;						\
+    krb5_boolean use_request_t;					\
+								\
+    /* Common state, to be freed in process.c */		\
+    struct timeval tv_start;					\
+    struct timeval tv_end;					\
+    const char *reqtype;					\
+    char *cname;						\
+    char *sname;						\
+    const char *e_text;						\
+    char *e_text_buf;						\
+    heim_string_t reason;                                       \
+    heim_array_t kv
+
 struct kdc_request_desc {
-    krb5_context context;
-    krb5_kdc_configuration *config;
+    KDC_REQUEST_DESC_COMMON_ELEMENTS;
+};
 
-    /* */
+struct astgs_request_desc {
+    KDC_REQUEST_DESC_COMMON_ELEMENTS;
 
-    krb5_data request;
+    /* Both AS and TGS */
     KDC_REQ req;
+
+    /* Only AS */
     METHOD_DATA *padata;
-
-    /* out */
-
     METHOD_DATA outpadata;
     
     KDC_REP rep;
@@ -72,22 +102,32 @@ struct kdc_request_desc {
     krb5_keyblock reply_key;
     krb5_keyblock session_key;
 
-    const char *e_text;
-
     /* state */
     krb5_principal client_princ;
-    char *client_name;
     hdb_entry_ex *client;
     HDB *clientdb;
 
     krb5_principal server_princ;
-    char *server_name;
     hdb_entry_ex *server;
 
     krb5_crypto armor_crypto;
 
     KDCFastState fast;
 };
+
+typedef struct kx509_req_context_desc {
+    KDC_REQUEST_DESC_COMMON_ELEMENTS;
+
+    struct Kx509Request req;
+    Kx509CSRPlus csr_plus;
+    krb5_auth_context ac;
+    const char *realm; /* XXX Confusion: is this crealm or srealm? */
+    krb5_keyblock *key;
+    hx509_request csr;
+    krb5_times ticket_times;
+    unsigned int send_chain:1;          /* Client expects a full chain */
+    unsigned int have_csr:1;            /* Client sent a CSR */
+} *kx509_req_context;
 
 
 extern sig_atomic_t exit_flag;

@@ -446,6 +446,11 @@ rk_wcsdup(const unsigned short *);
 
 #endif  /* _MSC_VER */
 
+#ifndef HAVE_MEMMEM
+#define memmem rk_smemmem
+ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL memmem(const char *);
+#endif
+
 #ifdef HAVE_WINSOCK
 
 /* While we are at it, define WinSock specific scatter gather socket
@@ -698,6 +703,11 @@ ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL lstat(const char *, struct stat *);
 ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL mkstemp(char *);
 #endif
 
+#ifndef HAVE_MKOSTEMP
+#define mkostemp rk_mkostemp
+ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL mkostemp(char *, int);
+#endif
+
 #ifndef HAVE_CGETENT
 #define cgetent rk_cgetent
 #define cgetstr rk_cgetstr
@@ -836,7 +846,7 @@ ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL roken_vconcat (char *, size_t, va_list);
 ROKEN_LIB_FUNCTION size_t ROKEN_LIB_CALL
     roken_vmconcat (char **, size_t, va_list);
 
-ROKEN_LIB_FUNCTION void ROKEN_LIB_CALL roken_detach_prep(int, char **, char *);
+ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL roken_detach_prep(int, char **, char *);
 ROKEN_LIB_FUNCTION void ROKEN_LIB_CALL roken_detach_finish(const char *, int);
 
 ROKEN_LIB_FUNCTION ssize_t ROKEN_LIB_CALL
@@ -1035,6 +1045,8 @@ ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL
 roken_get_appdatadir(char *, size_t);
 ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL
 roken_get_username(char *, size_t);
+ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL
+roken_get_loginname(char *, size_t);
 ROKEN_LIB_FUNCTION char * ROKEN_LIB_CALL
 roken_get_shell(char *, size_t);
 

@@ -37,10 +37,45 @@
 #include <getarg.h>
 #include <parse_bytes.h>
 
+static const char *sysplugin_dirs[] =  {
+#ifdef _WIN32
+    "$ORIGIN",
+#else
+    "$ORIGIN/../lib/plugin/kdc",
+#endif
+#ifdef __APPLE__
+    LIBDIR "/plugin/kdc",
+#endif
+    NULL
+};
+
+static void
+load_kdc_plugins_once(void *ctx)
+{
+    krb5_context context = ctx;
+    const char * const *dirs = sysplugin_dirs;
+#ifndef _WIN32
+    char **cfdirs;
+
+    cfdirs = krb5_config_get_strings(context, NULL, "kdc", "plugin_dir", NULL);
+    if (cfdirs)
+        dirs = (const char * const *)cfdirs;
+#endif
+
+    _krb5_load_plugins(context, "kdc", (const char **)dirs);
+
+#ifndef _WIN32
+    krb5_config_free_strings(cfdirs);
+#endif
+}
+
 krb5_error_code
 krb5_kdc_get_config(krb5_context context, krb5_kdc_configuration **config)
 {
+    static heim_base_once_t load_kdc_plugins = HEIM_BASE_ONCE_INIT;
     krb5_kdc_configuration *c;
+
+    heim_base_once_f(&load_kdc_plugins, context, load_kdc_plugins_once);
 
     c = calloc(1, sizeof(*c));
     if (c == NULL) {
@@ -48,6 +83,7 @@ krb5_kdc_get_config(krb5_context context, krb5_kdc_configuration **config)
 	return ENOMEM;
     }
 
+    c->app = "kdc";
     c->num_kdc_processes = -1;
     c->require_preauth = TRUE;
     c->kdc_warn_pwexpire = 0;
@@ -70,6 +106,7 @@ krb5_kdc_get_config(krb5_context context, krb5_kdc_configuration **config)
     c->logf = NULL;
     c->enable_derived_keys = FALSE;
     c->derived_keys_ndots = 2;
+    c->derived_keys_maxdots = -1;
 
     c->num_kdc_processes =
         krb5_config_get_int_default(context, NULL, c->num_kdc_processes,
@@ -110,21 +147,7 @@ krb5_kdc_get_config(krb5_context context, krb5_kdc_configuration **config)
     c->enable_kx509 =
 	krb5_config_get_bool_default(context, NULL,
 				     FALSE,
-				     "kdc", "enable-kx509", NULL);
-
-    if (c->enable_kx509) {
-	c->kx509_template =
-	    krb5_config_get_string(context, NULL,
-				   "kdc", "kx509_template", NULL);
-	c->kx509_ca =
-	    krb5_config_get_string(context, NULL,
-				   "kdc", "kx509_ca", NULL);
-	if (c->kx509_ca == NULL || c->kx509_template == NULL) {
-	    kdc_log(context, c, 0,
-		    "missing kx509 configuration, turning off");
-	    c->enable_kx509 = FALSE;
-	}
-    }
+				     "kdc", "enable_kx509", NULL);
 #endif
 
     c->tgt_use_strongest_session_key =
@@ -270,6 +293,10 @@ krb5_kdc_get_config(krb5_context context, krb5_kdc_configuration **config)
     c->derived_keys_ndots =
 	krb5_config_get_int_default(context, NULL, c->derived_keys_ndots,
 				    "kdc", "derived_keys_ndots", NULL);
+
+    c->derived_keys_maxdots =
+	krb5_config_get_int_default(context, NULL, c->derived_keys_maxdots,
+				    "kdc", "derived_keys_maxdots", NULL);
 
     *config = c;
 

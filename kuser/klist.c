@@ -36,6 +36,7 @@
 #include "kuser_locl.h"
 #include "parse_units.h"
 #include "heimtools-commands.h"
+#undef HC_DEPRECATED_CRYPTO
 
 static char*
 printable_time_internal(time_t t, int x)
@@ -161,7 +162,28 @@ print_cred_verbose(krb5_context context, krb5_creds *cred, int do_json)
     printf(N_("Client: %s\n", ""), str);
     free (str);
     
-    if (!krb5_is_config_principal(context, cred->client)) {
+    if (krb5_is_config_principal(context, cred->server)) {
+        if (krb5_principal_get_num_comp(context, cred->server) > 1) {
+            const char *s;
+
+            /* If the payload is text and not secret/sensitive, print it */
+            s = krb5_principal_get_comp_string(context, cred->server, 1);
+            if (strcmp(s, "start_realm") == 0 ||
+                strcmp(s, "anon_pkinit_realm") == 0 ||
+                strcmp(s, "default-ntlm-domain") == 0 ||
+                strcmp(s, "FriendlyName") == 0 ||
+                strcmp(s, "fast_avail") == 0 ||
+                strcmp(s, "kx509store") == 0 ||
+                strcmp(s, "kx509_service_realm") == 0 ||
+                strcmp(s, "kx509_service_status") == 0)
+                printf(N_("Configuration item payload: %.*s\n", ""),
+                       (int)cred->ticket.length,
+                       (const char *)cred->ticket.data);
+            else
+                printf(N_("Configuration item payload length: %lu\n", ""),
+                       (unsigned long)cred->ticket.length);
+        } /* else... this is a meaningless entry; nothing would create it */
+    } else {
 	Ticket t;
 	size_t len;
 	char *s;
@@ -190,41 +212,40 @@ print_cred_verbose(krb5_context context, krb5_creds *cred, int do_json)
 	free_Ticket(&t);
 	printf(N_("Ticket length: %lu\n", ""),
 	       (unsigned long)cred->ticket.length);
-    }
-    printf(N_("Auth time:  %s\n", ""),
-	   printable_time_long(cred->times.authtime));
-    if(cred->times.authtime != cred->times.starttime)
-	printf(N_("Start time: %s\n", ""),
-	       printable_time_long(cred->times.starttime));
-    printf(N_("End time:   %s", ""),
-	   printable_time_long(cred->times.endtime));
-    if(sec > cred->times.endtime)
-	printf(N_(" (expired)", ""));
-    printf("\n");
-    if(cred->flags.b.renewable)
-	printf(N_("Renew till: %s\n", ""),
-	       printable_time_long(cred->times.renew_till));
-    {
-	char flags[1024];
-	unparse_flags(TicketFlags2int(cred->flags.b),
-		      asn1_TicketFlags_units(),
-		      flags, sizeof(flags));
-	printf(N_("Ticket flags: %s\n", ""), flags);
-    }
-    printf(N_("Addresses: ", ""));
-    if (cred->addresses.len != 0) {
-	for(j = 0; j < cred->addresses.len; j++){
-	    char buf[128];
-	    size_t len;
-	    if(j) printf(", ");
-	    ret = krb5_print_address(&cred->addresses.val[j],
-				     buf, sizeof(buf), &len);
+        printf(N_("Auth time:  %s\n", ""),
+               printable_time_long(cred->times.authtime));
+        if(cred->times.authtime != cred->times.starttime)
+            printf(N_("Start time: %s\n", ""),
+                   printable_time_long(cred->times.starttime));
+        printf(N_("End time:   %s", ""),
+               printable_time_long(cred->times.endtime));
+        if(sec > cred->times.endtime)
+            printf(N_(" (expired)", ""));
+        printf("\n");
+        if(cred->flags.b.renewable)
+            printf(N_("Renew till: %s\n", ""),
+                   printable_time_long(cred->times.renew_till));
+        {
+            char flags[1024];
+            unparse_flags(TicketFlags2int(cred->flags.b),
+                          asn1_TicketFlags_units(),
+                          flags, sizeof(flags));
+            printf(N_("Ticket flags: %s\n", ""), flags);
+        }
+        printf(N_("Addresses: ", ""));
+        if (cred->addresses.len != 0) {
+            for(j = 0; j < cred->addresses.len; j++){
+                char buf[128];
+                if(j) printf(", ");
+                ret = krb5_print_address(&cred->addresses.val[j],
+                                         buf, sizeof(buf), &len);
 
-	    if(ret == 0)
-		printf("%s", buf);
-	}
-    } else {
-	printf(N_("addressless", ""));
+                if(ret == 0)
+                    printf("%s", buf);
+            }
+        } else {
+            printf(N_("addressless", ""));
+        }
     }
     printf("\n\n");
 }
@@ -234,21 +255,21 @@ print_cred_verbose(krb5_context context, krb5_creds *cred, int do_json)
  */
 
 static void
-print_tickets (krb5_context context,
-	       krb5_ccache ccache,
-	       krb5_principal principal,
-	       int do_verbose,
-	       int do_flags,
-	       int do_hidden,
-	       int do_json)
+print_tickets(krb5_context context,
+	      krb5_ccache ccache,
+	      krb5_principal principal,
+	      int do_verbose,
+	      int do_flags,
+	      int do_hidden,
+	      int do_json)
 {
     char *str, *name, *fullname;
     krb5_error_code ret;
     krb5_cc_cursor cursor;
     krb5_creds creds;
     krb5_deltat sec;
-
     rtbl_t ct = NULL;
+    int print_comma = 0;
 
     ret = krb5_unparse_name (context, principal, &str);
     if (ret)
@@ -320,24 +341,26 @@ print_tickets (krb5_context context,
     }
     if (do_verbose && do_json)
 	printf("\"tickets\" : [");
-    while ((ret = krb5_cc_next_cred (context,
-				     ccache,
-				     &cursor,
-				     &creds)) == 0) {
+    while ((ret = krb5_cc_next_cred(context, ccache, &cursor, &creds)) == 0) {
 	if (!do_hidden && krb5_is_config_principal(context, creds.server)) {
 	    ;
-	}else if(do_verbose){
+	} else if (do_verbose) {
+            if (do_json && print_comma)
+                printf(",");
 	    print_cred_verbose(context, &creds, do_json);
-	}else{
+            print_comma = 1;
+	} else {
 	    print_cred(context, &creds, ct, do_flags);
 	}
-	krb5_free_cred_contents (context, &creds);
+	krb5_free_cred_contents(context, &creds);
     }
-    if(ret != KRB5_CC_END)
+    if (ret != KRB5_CC_END)
 	krb5_err(context, 1, ret, "krb5_cc_get_next");
     ret = krb5_cc_end_seq_get (context, ccache, &cursor);
     if (ret)
-	krb5_err (context, 1, ret, "krb5_cc_end_seq_get");
+	krb5_err(context, 1, ret, "krb5_cc_end_seq_get");
+
+    print_comma = 0;
     if(!do_verbose) {
 	rtbl_format(ct, stdout);
 	rtbl_destroy(ct);
@@ -347,6 +370,7 @@ print_tickets (krb5_context context,
 	    printf("]");
 	printf("}");
     }
+    free(fullname);
 }
 
 /*
@@ -625,7 +649,8 @@ klist(struct klist_options *opt, int argc, char **argv)
 
 		exit_status |= display_v5_ccache(heimtools_context, id, do_test,
 						 do_verbose, opt->flags_flag,
-						 opt->hidden_flag, opt->json_flag);
+                                                 opt->hidden_flag,
+                                                 opt->json_flag);
 		if (!opt->json_flag)
 		    printf("\n\n");
 
@@ -646,7 +671,7 @@ klist(struct klist_options *opt, int argc, char **argv)
 	    }
 	    exit_status = display_v5_ccache(heimtools_context, id, do_test,
 					    do_verbose, opt->flags_flag,
-					    opt->hidden_flag, opt->json_flag);
+                                            opt->hidden_flag, opt->json_flag);
 	}
     }
 

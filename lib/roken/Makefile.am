@@ -20,7 +20,7 @@ if HAVE_DBHEADER
 AM_CPPFLAGS += -I$(DBHEADER)
 endif
 
-noinst_PROGRAMS = snprintf-test resolve-test rkpty test-detach test-auxval
+noinst_PROGRAMS = snprintf-test resolve-test rkpty test-detach test-auxval rkvis rkbase64
 
 CHECK_LOCAL = snprintf-test resolve-test rkpty make-roken
 
@@ -56,6 +56,12 @@ test_readenv_SOURCES = test-readenv.c test-mem.c
 test_auxval_SOURCES = test-auxval.c
 test_getuserinfo_SOURCES = test-getuserinfo.c
 test_getuserinfo_LDADD = libtest.la $(LDADD)
+
+rkvis_SOURCES = vis.c
+rkvis_CPPFLAGS = -DTEST
+
+rkbase64_SOURCES = base64.c
+rkbase64_CPPFLAGS = -DTEST
 
 test_detach_SOURCES = test-detach.c
 
@@ -102,8 +108,10 @@ libroken_la_SOURCES =		\
 	hex.c			\
 	hostent_find_fqdn.c	\
 	issuid.c		\
+	memmem.c		\
 	mini_inetd.c		\
 	mkdir.c                 \
+	mkostemp.c              \
 	net_read.c		\
 	net_write.c		\
 	parse_bytes.c		\

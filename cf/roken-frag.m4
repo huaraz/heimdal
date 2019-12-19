@@ -75,6 +75,7 @@ AC_CHECK_HEADERS([\
 	sys/auxv.h				\
 	sys/bswap.h				\
 	sys/errno.h				\
+	sys/exec_elf.h				\
 	sys/ioctl.h				\
 	sys/mman.h				\
 	sys/param.h				\
@@ -193,6 +194,8 @@ AC_CHECK_FUNCS([				\
 	getrlimit				\
 	getspnam				\
 	issetugid				\
+	memmem					\
+	mkostemp				\
 	on_exit					\
 	poll					\
 	random					\
@@ -210,6 +213,7 @@ AC_CHECK_FUNCS([				\
 	tfind					\
 	twalk					\
 	uname					\
+	unlinkat				\
 	unvis					\
 	vasnprintf				\
 	vasprintf				\

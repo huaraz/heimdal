@@ -57,6 +57,7 @@ NOINSTPROGRAMS=\
 BINLIBS=\
 	$(LIBHEIMDAL)	\
 	$(LIBHEIMNTLM)	\
+	$(LIBHX509)	\
 !if !defined(NO_AFS)
         $(LIBKAFS)      \
 !endif
@@ -78,6 +79,7 @@ HEIMTOOLS_OBJS =				\
 	$(OBJ)\heimtools.obj			\
 	$(OBJ)\kswitch.obj		\
 	$(OBJ)\klist.obj		\
+	$(OBJ)\kx509.obj		\
 	$(OBJ)\copy_cred_cache.obj
 
 HEIMTOOLSLIBS=\

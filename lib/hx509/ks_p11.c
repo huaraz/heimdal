@@ -820,6 +820,18 @@ p11_init(hx509_context context,
 
     *data = NULL;
 
+    if (flags & HX509_CERTS_NO_PRIVATE_KEYS) {
+	hx509_set_error_string(context, 0, ENOTSUP,
+			       "PKCS#11 store does not support "
+                               "HX509_CERTS_NO_PRIVATE_KEYS flag");
+        return ENOTSUP;
+    }
+
+    if (residue == NULL || residue[0] == '\0') {
+	hx509_set_error_string(context, 0, EINVAL,
+			       "PKCS#11 store not specified");
+        return EINVAL;
+    }
     list = strdup(residue);
     if (list == NULL)
 	return ENOMEM;
@@ -1202,6 +1214,7 @@ static struct hx509_keyset_ops keyset_pkcs11 = {
     p11_iter,
     p11_iter_end,
     p11_printinfo,
+    NULL,
     NULL,
     NULL
 };

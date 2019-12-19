@@ -36,7 +36,8 @@
 #include "kdc_locl.h"
 
 static krb5_error_code
-get_fastuser_crypto(kdc_request_t r, krb5_enctype enctype, krb5_crypto *crypto)
+get_fastuser_crypto(astgs_request_t r, krb5_enctype enctype,
+		    krb5_crypto *crypto)
 {
     krb5_principal fast_princ;
     hdb_entry_ex *fast_user = NULL;
@@ -79,7 +80,7 @@ get_fastuser_crypto(kdc_request_t r, krb5_enctype enctype, krb5_crypto *crypto)
 
 
 static krb5_error_code
-fast_parse_cookie(kdc_request_t r, const PA_DATA *pa)
+fast_parse_cookie(astgs_request_t r, const PA_DATA *pa)
 {
     krb5_crypto crypto = NULL;
     krb5_error_code ret;
@@ -115,7 +116,7 @@ fast_parse_cookie(kdc_request_t r, const PA_DATA *pa)
 	goto out;
 
     if (r->fast.expiration < kdc_time) {
-	kdc_log(r->context, r->config, 0, "fast cookie expired");
+	kdc_log(r->context, r->config, 2, "fast cookie expired");
 	ret = KRB5KDC_ERR_POLICY;
 	goto out;
     }
@@ -127,7 +128,7 @@ fast_parse_cookie(kdc_request_t r, const PA_DATA *pa)
 }
 
 static krb5_error_code
-fast_add_cookie(kdc_request_t r, METHOD_DATA *method_data)
+fast_add_cookie(astgs_request_t r, METHOD_DATA *method_data)
 {
     krb5_crypto crypto = NULL;
     KDCFastCookie shell;
@@ -237,8 +238,7 @@ _kdc_fast_mk_response(krb5_context context,
 
 
 krb5_error_code
-_kdc_fast_mk_error(krb5_context context,
-		   kdc_request_t r,
+_kdc_fast_mk_error(astgs_request_t r,
 		   METHOD_DATA *error_method,
 		   krb5_crypto armor_crypto,
 		   const KDC_REQ_BODY *req_body,
@@ -250,6 +250,7 @@ _kdc_fast_mk_error(krb5_context context,
 		   time_t *csec, int *cusec,
 		   krb5_data *error_msg)
 {
+    krb5_context context = r->context;
     krb5_error_code ret;
     krb5_data e_data;
     size_t size;
@@ -298,7 +299,7 @@ _kdc_fast_mk_error(krb5_context context,
 				  KRB5_PADATA_FX_COOKIE,
 				  NULL, 0);
 	if (ret) {
-	    kdc_log(r->context, r->config, 0, "failed to add fast cookie with: %d", ret);
+	    kdc_log(r->context, r->config, 1, "failed to add fast cookie with: %d", ret);
 	    free_METHOD_DATA(error_method);
 	    return ret;
 	}
@@ -342,7 +343,7 @@ _kdc_fast_mk_error(krb5_context context,
 }
 
 krb5_error_code
-_kdc_fast_unwrap_request(kdc_request_t r)
+_kdc_fast_unwrap_request(astgs_request_t r)
 {
     krb5_principal armor_server = NULL;
     hdb_entry_ex *armor_user = NULL;
@@ -388,7 +389,7 @@ _kdc_fast_unwrap_request(kdc_request_t r)
     }
 
     if (fxreq.element != choice_PA_FX_FAST_REQUEST_armored_data) {
-	kdc_log(r->context, r->config, 0,
+	kdc_log(r->context, r->config, 2,
 		"AS-REQ FAST contain unknown type: %d", (int)fxreq.element);
 	ret = KRB5KDC_ERR_PREAUTH_FAILED;
 	goto out;
@@ -396,14 +397,14 @@ _kdc_fast_unwrap_request(kdc_request_t r)
 
     /* pull out armor key */
     if (fxreq.u.armored_data.armor == NULL) {
-	kdc_log(r->context, r->config, 0,
+	kdc_log(r->context, r->config, 2,
 		"AS-REQ armor missing");
 	ret = KRB5KDC_ERR_PREAUTH_FAILED;
 	goto out;
     }
 
     if (fxreq.u.armored_data.armor->armor_type != 1) {
-	kdc_log(r->context, r->config, 0,
+	kdc_log(r->context, r->config, 2,
 		"AS-REQ armor type not ap-req");
 	ret = KRB5KDC_ERR_PREAUTH_FAILED;
 	goto out;
@@ -413,7 +414,7 @@ _kdc_fast_unwrap_request(kdc_request_t r)
 			     &fxreq.u.armored_data.armor->armor_value,
 			     &ap_req);
     if(ret) {
-	kdc_log(r->context, r->config, 0, "AP-REQ decode failed");
+	kdc_log(r->context, r->config, 2, "AP-REQ decode failed");
 	goto out;
     }
 
@@ -433,6 +434,7 @@ _kdc_fast_unwrap_request(kdc_request_t r)
 	kdc_log(r->context, r->config, 5,
 		"armor key does not have secrets at this KDC, "
 		"need to proxy");
+	free_AP_REQ(&ap_req);
 	goto out;
     } else if (ret) {
 	free_AP_REQ(&ap_req);
@@ -462,7 +464,7 @@ _kdc_fast_unwrap_request(kdc_request_t r)
 
     if (ac->remote_subkey == NULL) {
 	krb5_auth_con_free(r->context, ac);
-	kdc_log(r->context, r->config, 0,
+	kdc_log(r->context, r->config, 2,
 		"FAST AP-REQ remote subkey missing");
 	ret = KRB5KDC_ERR_PREAUTH_FAILED;
 	goto out;
@@ -495,7 +497,7 @@ _kdc_fast_unwrap_request(kdc_request_t r)
 			       buf, len, 
 			       &fxreq.u.armored_data.req_checksum);
     if (ret) {
-	kdc_log(r->context, r->config, 0,
+	kdc_log(r->context, r->config, 2,
 		"FAST request have a bad checksum");
 	goto out;
     }
@@ -505,7 +507,7 @@ _kdc_fast_unwrap_request(kdc_request_t r)
 				     &fxreq.u.armored_data.enc_fast_req,
 				     &data);
     if (ret) {
-	kdc_log(r->context, r->config, 0,
+	kdc_log(r->context, r->config, 2,
 		"Failed to decrypt FAST request");
 	goto out;
     }
@@ -529,7 +531,7 @@ _kdc_fast_unwrap_request(kdc_request_t r)
 	    
     /* check for unsupported mandatory options */
     if (FastOptions2int(fastreq.fast_options) & 0xfffc) {
-	kdc_log(r->context, r->config, 0,
+	kdc_log(r->context, r->config, 2,
 		"FAST unsupported mandatory option set");
 	ret = KRB5KDC_ERR_PREAUTH_FAILED;
 	goto out;

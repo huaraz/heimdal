@@ -102,6 +102,30 @@ init_context_once(void *ignored)
 }
 
 /**
+ * Return a cookie identifying this instance of a library.
+ *
+ * Inputs:
+ *
+ * @context     A krb5_context
+ * @module      Our library name or a library we depend on
+ *
+ * Outputs:     The instance cookie
+ *
+ * @ingroup     krb5_support
+ */
+
+HX509_LIB_FUNCTION uintptr_t HX509_LIB_CALL
+hx509_get_instance(const char *libname)
+{
+    static const char *instance = "libhx509";
+
+    if (strcmp(libname, "hx509") == 0)
+        return (uintptr_t)instance;
+
+    return 0;
+}
+
+/**
  * Creates a hx509 context that most functions in the library
  * uses. The context is only allowed to be used by one thread at each
  * moment. Free the context with hx509_context_free().
@@ -178,6 +202,9 @@ hx509_context_set_missing_revoke(hx509_context context, int flag)
 HX509_LIB_FUNCTION void HX509_LIB_CALL
 hx509_context_free(hx509_context *context)
 {
+    if (!*context)
+        return;
+
     hx509_clear_error_string(*context);
     if ((*context)->ks_ops) {
 	free((*context)->ks_ops);
@@ -212,6 +239,29 @@ _hx509_cert_get_version(const Certificate *t)
     return t->tbsCertificate.version ? *t->tbsCertificate.version + 1 : 1;
 }
 
+static hx509_cert
+cert_init(hx509_context context, heim_error_t *error)
+{
+    hx509_cert cert;
+
+    cert = malloc(sizeof(*cert));
+    if (cert == NULL) {
+	if (error)
+	    *error = heim_error_create_enomem();
+	return NULL;
+    }
+    cert->ref = 1;
+    cert->friendlyname = NULL;
+    cert->attrs.len = 0;
+    cert->attrs.val = NULL;
+    cert->private_key = NULL;
+    cert->basename = NULL;
+    cert->release = NULL;
+    cert->ctx = NULL;
+    cert->data= NULL;
+    return cert;
+}
+
 /**
  * Allocate and init an hx509 certificate object from the decoded
  * certificate `c´.
@@ -231,20 +281,8 @@ hx509_cert_init(hx509_context context, const Certificate *c, heim_error_t *error
     hx509_cert cert;
     int ret;
 
-    cert = malloc(sizeof(*cert));
-    if (cert == NULL) {
-	if (error)
-	    *error = heim_error_create_enomem();
-	return NULL;
-    }
-    cert->ref = 1;
-    cert->friendlyname = NULL;
-    cert->attrs.len = 0;
-    cert->attrs.val = NULL;
-    cert->private_key = NULL;
-    cert->basename = NULL;
-    cert->release = NULL;
-    cert->ctx = NULL;
+    if ((cert = cert_init(context, error)) == NULL)
+        return NULL;
 
     cert->data = calloc(1, sizeof(*(cert->data)));
     if (cert->data == NULL) {
@@ -259,6 +297,51 @@ hx509_cert_init(hx509_context context, const Certificate *c, heim_error_t *error
 	free(cert);
 	cert = NULL;
     }
+    return cert;
+}
+
+/**
+ * Copy a certificate object, but drop any private key assignment.
+ *
+ * @param context A hx509 context.
+ * @param src Certificate object
+ * @param error
+ *
+ * @return Returns an hx509 certificate
+ *
+ * @ingroup hx509_cert
+ */
+
+HX509_LIB_FUNCTION hx509_cert HX509_LIB_CALL
+hx509_cert_copy_no_private_key(hx509_context context,
+                               hx509_cert src,
+                               heim_error_t *error)
+{
+    return hx509_cert_init(context, src->data, error);
+}
+
+/**
+ * Allocate and init an hx509 certificate object containing only a private key
+ * (but no Certificate).
+ *
+ * @param context A hx509 context.
+ * @param key
+ * @param error
+ *
+ * @return Returns an hx509 certificate
+ *
+ * @ingroup hx509_cert
+ */
+
+HX509_LIB_FUNCTION hx509_cert HX509_LIB_CALL
+hx509_cert_init_private_key(hx509_context context,
+                            hx509_private_key key,
+                            heim_error_t *error)
+{
+    hx509_cert cert;
+
+    if ((cert = cert_init(context, error)))
+        (void) _hx509_cert_assign_key(cert, key);
     return cert;
 }
 
@@ -296,6 +379,7 @@ hx509_cert_init_data(hx509_context context,
     if (ret) {
 	if (error)
 	    *error = heim_error_create(ret, "Failed to decode certificate");
+        errno = ret;
 	return NULL;
     }
     if (size != len) {
@@ -303,6 +387,7 @@ hx509_cert_init_data(hx509_context context,
 	if (error)
 	    *error = heim_error_create(HX509_EXTRA_DATA_AFTER_STRUCTURE,
 				       "Extra data after certificate");
+        errno = HX509_EXTRA_DATA_AFTER_STRUCTURE;
 	return NULL;
     }
 
@@ -360,7 +445,8 @@ hx509_cert_free(hx509_cert cert)
     if (cert->private_key)
 	hx509_private_key_free(&cert->private_key);
 
-    free_Certificate(cert->data);
+    if (cert->data)
+        free_Certificate(cert->data);
     free(cert->data);
 
     for (i = 0; i < cert->attrs.len; i++) {
@@ -1598,10 +1684,34 @@ _hx509_cert_private_key(hx509_cert p)
     return p->private_key;
 }
 
+/**
+ * Indicate whether a hx509_cert has a private key.
+ *
+ * @param p a hx509 certificate
+ *
+ * @return 1 if p has a private key, 0 otherwise.
+ *
+ * @ingroup hx509_cert
+ */
 HX509_LIB_FUNCTION int HX509_LIB_CALL
 hx509_cert_have_private_key(hx509_cert p)
 {
     return p->private_key ? 1 : 0;
+}
+
+/**
+ * Indicate whether a hx509_cert has a private key only (no certificate).
+ *
+ * @param p a hx509 certificate
+ *
+ * @return 1 if p has a private key only (no certificate), 0 otherwise.
+ *
+ * @ingroup hx509_cert
+ */
+HX509_LIB_FUNCTION int HX509_LIB_CALL
+hx509_cert_have_private_key_only(hx509_cert p)
+{
+    return p->private_key && !p->data ? 1 : 0;
 }
 
 
@@ -2889,12 +2999,21 @@ hx509_query_match_expr(hx509_context context, hx509_query *q, const char *expr)
 
     if (expr == NULL) {
 	q->match &= ~HX509_QUERY_MATCH_EXPR;
-    } else {
-	q->expr = _hx509_expr_parse(expr);
-	if (q->expr)
-	    q->match |= HX509_QUERY_MATCH_EXPR;
+        return 0;
     }
 
+    q->expr = _hx509_expr_parse(expr);
+    if (q->expr == NULL) {
+        const char *reason = _hx509_expr_parse_error();
+
+        hx509_set_error_string(context, 0, EINVAL,
+                               "Invalid certificate query match expression: "
+                               "%s (%s)", expr,
+                               reason ? reason : "syntax error");
+        return EINVAL;
+    }
+
+    q->match |= HX509_QUERY_MATCH_EXPR;
     return 0;
 }
 
@@ -3621,7 +3740,7 @@ hx509_print_cert(hx509_context context, hx509_cert cert, FILE *out)
 	free(str);
     }
 
-    printf("    keyusage: ");
+    fprintf(out, "    keyusage: ");
     ret = hx509_cert_keyusage_print(context, cert, &str);
     if (ret == 0) {
 	fprintf(out, "%s\n", str);

@@ -65,18 +65,27 @@ static const struct {
     const char *n;
     const heim_oid *o;
     wind_profile_flags flags;
+    /*
+     * RFC52380 imposes maximum lengths for some strings in Names.  These are
+     * ASN.1 size limits.  We should implement these in our copy of the PKIX
+     * ASN.1 module.  For now we treat them as maximum byte counts rather than
+     * maximum character counts, and we encode and enforce them here.
+     *
+     * 0 -> no max
+     */
+    size_t max_bytes;
 } no[] = {
-    { "C", &asn1_oid_id_at_countryName, 0 },
-    { "CN", &asn1_oid_id_at_commonName, 0 },
-    { "DC", &asn1_oid_id_domainComponent, 0 },
-    { "L", &asn1_oid_id_at_localityName, 0 },
-    { "O", &asn1_oid_id_at_organizationName, 0 },
-    { "OU", &asn1_oid_id_at_organizationalUnitName, 0 },
-    { "S", &asn1_oid_id_at_stateOrProvinceName, 0 },
-    { "STREET", &asn1_oid_id_at_streetAddress, 0 },
-    { "UID", &asn1_oid_id_Userid, 0 },
-    { "emailAddress", &asn1_oid_id_pkcs9_emailAddress, 0 },
-    { "serialNumber", &asn1_oid_id_at_serialNumber, 0 }
+    { "C", &asn1_oid_id_at_countryName, 0, 2 },
+    { "CN", &asn1_oid_id_at_commonName, 0, ub_common_name },
+    { "DC", &asn1_oid_id_domainComponent, 0, 63 }, /* DNS label */
+    { "L", &asn1_oid_id_at_localityName, 0, ub_locality_name },
+    { "O", &asn1_oid_id_at_organizationName, 0, ub_organization_name },
+    { "OU", &asn1_oid_id_at_organizationalUnitName, 0, ub_organizational_unit_name },
+    { "S", &asn1_oid_id_at_stateOrProvinceName, 0, ub_state_name },
+    { "STREET", &asn1_oid_id_at_streetAddress, 0, 0 }, /* ENOTSUP */
+    { "UID", &asn1_oid_id_Userid, 0, ub_numeric_user_id_length },
+    { "emailAddress", &asn1_oid_id_pkcs9_emailAddress, 0, ub_emailaddress_length },
+    { "serialNumber", &asn1_oid_id_at_serialNumber, 0, ub_serial_number }
 };
 
 static char *
@@ -154,6 +163,18 @@ oidtostring(const heim_oid *type)
     if (der_print_heim_oid(type, '.', &s) != 0)
 	return NULL;
     return s;
+}
+
+static size_t
+oidtomaxlen(const heim_oid *type)
+{
+    size_t i;
+
+    for (i = 0; i < sizeof(no)/sizeof(no[0]); i++) {
+	if (der_heim_oid_cmp(no[i].o, type) == 0)
+	    return no[i].max_bytes;
+    }
+    return 0;
 }
 
 static int
@@ -531,42 +552,69 @@ _hx509_name_modify(hx509_context context,
 		   const heim_oid *oid,
 		   const char *str)
 {
-    RelativeDistinguishedName *rdn;
+    RelativeDistinguishedName rdn;
+    size_t max_len = oidtomaxlen(oid);
     int ret;
-    void *ptr;
 
-    ptr = realloc(name->u.rdnSequence.val,
-		  sizeof(name->u.rdnSequence.val[0]) *
-		  (name->u.rdnSequence.len + 1));
-    if (ptr == NULL) {
+    /*
+     * Check string length upper bounds.
+     *
+     * Because we don't have these bounds in our copy of the PKIX ASN.1 module,
+     * and because we might like to catch these early anyways, we enforce them
+     * here.
+     */
+    if (max_len && strlen(str) > max_len) {
+        const char *a = oidtostring(oid);
+
+        ret = HX509_PARSING_NAME_FAILED;
+        hx509_set_error_string(context, 0, ret, "RDN attribute %s value too "
+                               "long (max %llu): %s", a ? a : "<unknown>",
+                               max_len, str);
+        return ret;
+    }
+
+    memset(&rdn, 0, sizeof(rdn));
+    if ((rdn.val = malloc(sizeof(rdn.val[0]))) == NULL) {
 	hx509_set_error_string(context, 0, ENOMEM, "Out of memory");
 	return ENOMEM;
     }
-    name->u.rdnSequence.val = ptr;
-
-    if (append) {
-	rdn = &name->u.rdnSequence.val[name->u.rdnSequence.len];
-    } else {
-	memmove(&name->u.rdnSequence.val[1],
-		&name->u.rdnSequence.val[0],
-		name->u.rdnSequence.len *
-		sizeof(name->u.rdnSequence.val[0]));
-
-	rdn = &name->u.rdnSequence.val[0];
+    rdn.len = 1;
+    rdn.val[0].value.element = choice_DirectoryString_utf8String;
+    if ((rdn.val[0].value.u.utf8String = strdup(str)) == NULL ||
+        (ret = der_copy_oid(oid, &rdn.val[0].type))) {
+	hx509_set_error_string(context, 0, ENOMEM, "Out of memory");
+        free(rdn.val[0].value.u.utf8String);
+        free(rdn.val);
+	return ENOMEM;
     }
-    rdn->val = malloc(sizeof(rdn->val[0]));
-    if (rdn->val == NULL)
-	return ENOMEM;
-    rdn->len = 1;
-    ret = der_copy_oid(oid, &rdn->val[0].type);
-    if (ret)
-	return ret;
-    rdn->val[0].value.element = choice_DirectoryString_utf8String;
-    rdn->val[0].value.u.utf8String = strdup(str);
-    if (rdn->val[0].value.u.utf8String == NULL)
-	return ENOMEM;
-    name->u.rdnSequence.len += 1;
 
+    /* Append RDN.  If the caller wanted to prepend instead, we'll rotate. */
+    ret = add_RDNSequence(&name->u.rdnSequence, &rdn);
+    free_RelativeDistinguishedName(&rdn);
+
+    if (ret || append || name->u.rdnSequence.len < 2)
+        return ret;
+
+    /* Rotate */
+    rdn = name->u.rdnSequence.val[name->u.rdnSequence.len - 1];
+    memmove(&name->u.rdnSequence.val[1],
+            &name->u.rdnSequence.val[0],
+            (name->u.rdnSequence.len - 1) *
+            sizeof(name->u.rdnSequence.val[0]));
+    name->u.rdnSequence.val[0] = rdn;
+    return 0;
+}
+
+HX509_LIB_FUNCTION int HX509_LIB_CALL
+hx509_empty_name(hx509_context context, hx509_name *name)
+{
+    if ((*name = calloc(1, sizeof(**name))) == NULL) {
+	hx509_set_error_string(context, 0, ENOMEM, "out of memory");
+	return ENOMEM;
+    }
+    (*name)->der_name.element = choice_Name_rdnSequence;
+    (*name)->der_name.u.rdnSequence.val = 0;
+    (*name)->der_name.u.rdnSequence.len = 0;
     return 0;
 }
 
@@ -746,6 +794,7 @@ hx509_name_expand(hx509_context context,
 {
     Name *n = &name->der_name;
     size_t i, j;
+    int bounds_check = 1;
 
     if (env == NULL)
 	return 0;
@@ -768,6 +817,7 @@ hx509_name_expand(hx509_context context,
 	      free normalized utf8 string
 	    */
 	    DirectoryString *ds = &n->u.rdnSequence.val[i].val[j].value;
+            heim_oid *type = &n->u.rdnSequence.val[i].val[j].type;
 	    char *p, *p2;
 	    struct rk_strpool *strpool = NULL;
 
@@ -822,14 +872,27 @@ hx509_name_expand(hx509_context context,
 		}
 	    }
 	    if (strpool) {
+                size_t max_bytes;
+
 		free(ds->u.utf8String);
 		ds->u.utf8String = rk_strpoolcollect(strpool);
 		if (ds->u.utf8String == NULL) {
 		    hx509_set_error_string(context, 0, ENOMEM, "out of memory");
 		    return ENOMEM;
 		}
+
+                /* Check upper bounds! */
+                if ((max_bytes = oidtomaxlen(type)) &&
+                    strlen(ds->u.utf8String) > max_bytes)
+                    bounds_check = 0;
 	    }
 	}
+    }
+
+    if (!bounds_check) {
+        hx509_set_error_string(context, 0, HX509_PARSING_NAME_FAILED,
+                               "some expanded RDNs are too long");
+        return HX509_PARSING_NAME_FAILED;
     }
     return 0;
 }
@@ -922,7 +985,7 @@ _hx509_unparse_Name(const Name *aname, char **str)
 }
 
 /**
- * Unparse the hx509 name in name into a string.
+ * Check if a name is empty.
  *
  * @param name the name to check if its empty/null.
  *
@@ -934,7 +997,104 @@ _hx509_unparse_Name(const Name *aname, char **str)
 HX509_LIB_FUNCTION int HX509_LIB_CALL
 hx509_name_is_null_p(const hx509_name name)
 {
-    return name->der_name.u.rdnSequence.len == 0;
+    return name->der_name.element == choice_Name_rdnSequence &&
+        name->der_name.u.rdnSequence.len == 0;
+}
+
+/*
+ * This necessarily duplicates code from libkrb5, and has to unless we move
+ * common code here or to lib/roken for it.  We do have slightly different
+ * needs (e.g., we want space quoted, and we want to indicate whether we saw
+ * trailing garbage, we have no need for flags, no special realm treatment,
+ * etc) than the corresponding code in libkrb5, so for now we duplicate this
+ * code.
+ *
+ * The relevant RFCs here are RFC1964 for the string representation of Kerberos
+ * principal names, and RFC4556 for the KRB5PrincipalName ASN.1 type (Kerberos
+ * lacks such a type because on the wire the name and realm are sent
+ * separately as a form of cheap compression).
+ *
+ * Note that we cannot handle embedded NULs because of Heimdal's representation
+ * of ASN.1 strings as C strings.
+ */
+struct rk_strpool *
+_hx509_unparse_kerberos_name(struct rk_strpool *strpool, heim_any *value)
+{
+    static const char comp_quotable_chars[] = " \n\t\b\\/@";
+    static const char realm_quotable_chars[] = " \n\t\b\\@";
+    KRB5PrincipalName kn;
+    const char *s;
+    size_t i, k, len, plen;
+    int extra_bits;
+    int need_slash = 0;
+    int ret;
+
+    ret = decode_KRB5PrincipalName(value->data, value->length, &kn, &len);
+    if (ret)
+        return rk_strpoolprintf(strpool, "<error-decoding-PrincipalName");
+    extra_bits = (value->length != len);
+
+    for (i = 0; i < kn.principalName.name_string.len; i++) {
+        s = kn.principalName.name_string.val[i];
+        len = strlen(s);
+
+        if (need_slash)
+            strpool = rk_strpoolprintf(strpool, "/");
+        need_slash = 1;
+
+        for (k = 0; k < len; s += plen, k += plen) {
+            char c;
+
+            plen = strcspn(s, comp_quotable_chars);
+            if (plen)
+                strpool = rk_strpoolprintf(strpool, "%.*s", (int)plen, s);
+            if (k + plen >= len)
+                continue;
+            switch ((c = s[plen++])) {
+            case '\n':  strpool = rk_strpoolprintf(strpool, "\\n");     break;
+            case '\t':  strpool = rk_strpoolprintf(strpool, "\\t");     break;
+            case '\b':  strpool = rk_strpoolprintf(strpool, "\\b");     break;
+                        /* default -> '@', ' ', '\\', or '/' */
+            default:    strpool = rk_strpoolprintf(strpool, "\\%c", c); break;
+            }
+        }
+    }
+    strpool = rk_strpoolprintf(strpool, "@");
+    s = kn.realm;
+    len = strlen(kn.realm);
+    for (k = 0; k < len; s += plen, k += plen) {
+        char c;
+
+        plen = strcspn(s, realm_quotable_chars);
+        if (plen)
+            strpool = rk_strpoolprintf(strpool, "%.*s", (int)plen, s);
+        if (k + plen >= len)
+            continue;
+        switch ((c = s[plen++])) {
+        case '\n':  strpool = rk_strpoolprintf(strpool, "\\n");     break;
+        case '\t':  strpool = rk_strpoolprintf(strpool, "\\t");     break;
+        case '\b':  strpool = rk_strpoolprintf(strpool, "\\b");     break;
+                    /* default -> '@', ' ', or '\\' */
+        default:    strpool = rk_strpoolprintf(strpool, "\\%c", c); break;
+        }
+    }
+    if (extra_bits)
+        strpool = rk_strpoolprintf(strpool, " <garbage>");
+    free_KRB5PrincipalName(&kn);
+    return strpool;
+}
+
+struct rk_strpool *
+hx509_unparse_utf8_string_name(struct rk_strpool *strpool, heim_any *value)
+{
+    PKIXXmppAddr us;
+    size_t size;
+
+    if (decode_PKIXXmppAddr(value->data, value->length, &us, &size))
+        return rk_strpoolprintf(strpool, "<decode-error>");
+    strpool = rk_strpoolprintf(strpool, "%s", us);
+    free_PKIXXmppAddr(&us);
+    return strpool;
 }
 
 /**
@@ -961,17 +1121,34 @@ hx509_general_name_unparse(GeneralName *name, char **str)
 	hx509_oid_sprint(&name->u.otherName.type_id, &oid);
 	if (oid == NULL)
 	    return ENOMEM;
-	strpool = rk_strpoolprintf(strpool, "otherName: %s", oid);
+	strpool = rk_strpoolprintf(strpool, "otherName: %s ", oid);
+        if (der_heim_oid_cmp(&name->u.otherName.type_id,
+                             &asn1_oid_id_pkinit_san) == 0) {
+            strpool = _hx509_unparse_kerberos_name(strpool,
+                                                   &name->u.otherName.value);
+        } else if (der_heim_oid_cmp(&name->u.otherName.type_id,
+                                    &asn1_oid_id_pkix_on_xmppAddr) == 0) {
+            strpool = rk_strpoolprintf(strpool, "xmppAddr ");
+            strpool = hx509_unparse_utf8_string_name(strpool,
+                                                     &name->u.otherName.value);
+        } else if (der_heim_oid_cmp(&name->u.otherName.type_id,
+                                    &asn1_oid_id_pkinit_ms_san) == 0) {
+            strpool = rk_strpoolprintf(strpool, "pkinitMsSan ");
+            strpool = hx509_unparse_utf8_string_name(strpool,
+                                                     &name->u.otherName.value);
+        } else {
+            strpool = rk_strpoolprintf(strpool, "<unknown-other-name-type");
+        }
 	free(oid);
 	break;
     }
     case choice_GeneralName_rfc822Name:
-	strpool = rk_strpoolprintf(strpool, "rfc822Name: %.*s\n",
+	strpool = rk_strpoolprintf(strpool, "rfc822Name: %.*s",
 				   (int)name->u.rfc822Name.length,
 				   (char *)name->u.rfc822Name.data);
 	break;
     case choice_GeneralName_dNSName:
-	strpool = rk_strpoolprintf(strpool, "dNSName: %.*s\n",
+	strpool = rk_strpoolprintf(strpool, "dNSName: %.*s",
 				   (int)name->u.dNSName.length,
 				   (char *)name->u.dNSName.data);
 	break;
@@ -1031,10 +1208,8 @@ hx509_general_name_unparse(GeneralName *name, char **str)
     default:
 	return EINVAL;
     }
-    if (strpool == NULL)
+    if (strpool == NULL ||
+        (*str = rk_strpoolcollect(strpool)) == NULL)
 	return ENOMEM;
-
-    *str = rk_strpoolcollect(strpool);
-
     return 0;
 }

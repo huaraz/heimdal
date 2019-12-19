@@ -386,7 +386,10 @@ typedef struct krb5_cccol_cursor_data *krb5_cccol_cursor;
 typedef struct krb5_ccache_data {
     const struct krb5_cc_ops *ops;
     krb5_data data;
-    int initialized; /* if non-zero: krb5_cc_initialize() called, now empty */
+    unsigned int cc_initialized:1;      /* if 1: krb5_cc_initialize() called */
+    unsigned int cc_need_start_realm:1;
+    unsigned int cc_start_tgt_stored:1;
+    unsigned int cc_kx509_done:1;
 }krb5_ccache_data;
 
 typedef struct krb5_ccache_data *krb5_ccache;
@@ -675,7 +678,10 @@ typedef struct {
 
 extern const char *heimdal_version, *heimdal_long_version;
 
-typedef void (KRB5_CALLCONV * krb5_log_log_func_t)(const char*, const char*, void*);
+typedef void (KRB5_CALLCONV * krb5_log_log_func_t)(krb5_context,
+						   const char*,
+						   const char*,
+						   void*);
 typedef void (KRB5_CALLCONV * krb5_log_close_func_t)(void*);
 
 typedef struct krb5_log_facility {
@@ -881,6 +887,21 @@ enum krb5_plugin_type {
     PLUGIN_TYPE_FUNC /* no longer supported */
 };
 
+/*
+ * Since <krb5/common_plugin.h> is new with Heimdal 8, users looking to write
+ * portable plugins across Heimdal 7 and 8 need a conditional compilation
+ * predicate from a header file that does exist in both major releases.  This
+ * is as good a place as any to define a plugin source-compatibility version
+ * number.
+ *
+ * When this macro is defined and is equal to 1, the Heimdal 8 plugin source
+ * API, and <krb5/common_plugin.h> header are available and should be used.
+ *
+ * In Heimdal 7, this macro is not defined, and <krb5/common_plugin.h> may not
+ * be available.
+ */
+#define KRB5_PLUGIN_COMMON_SPI_VERSION 1
+
 #define KRB5_PLUGIN_INVOKE_ALL  1
 
 typedef uintptr_t
@@ -971,6 +992,7 @@ typedef struct krb5_name_canon_iterator_data *krb5_name_canon_iterator;
  */
 
 struct hx509_certs_data;
+typedef struct krb5_kx509_req_ctx_data *krb5_kx509_req_ctx;
 
 #include <krb5-protos.h>
 

@@ -40,6 +40,8 @@
  *      $ keyctl new_session
  */
 
+#ifndef WIN32
+
 #include "krb5_locl.h"
 #include <getarg.h>
 #include <err.h>
@@ -218,7 +220,7 @@ test_cache_remove(krb5_context context, const char *type)
     krb5_error_code ret;
     krb5_ccache id;
     krb5_principal p;
-    krb5_creds cred;
+    krb5_creds cred, found;
 
     ret = krb5_parse_name(context, "lha@SU.SE", &p);
     if (ret)
@@ -240,6 +242,7 @@ test_cache_remove(krb5_context context, const char *type)
     ret = krb5_parse_name(context, "lha@SU.SE", &cred.client);
     if (ret)
 	krb5_err(context, 1, ret, "krb5_parse_name");
+    cred.times.endtime = time(NULL) + 300;
 
     ret = krb5_cc_store_cred(context, id, &cred);
     if (ret)
@@ -248,6 +251,12 @@ test_cache_remove(krb5_context context, const char *type)
     ret = krb5_cc_remove_cred(context, id, 0, &cred);
     if (ret)
 	krb5_err(context, 1, ret, "krb5_cc_remove_cred");
+
+    memset(&found, 0, sizeof(found));
+    ret = krb5_cc_retrieve_cred(context, id, KRB5_TC_MATCH_TIMES,
+                                &cred, &found);
+    if (ret == 0)
+	krb5_err(context, 1, ret, "krb5_cc_remove_cred didn't");
 
     ret = krb5_cc_destroy(context, id);
     if (ret)
@@ -506,6 +515,7 @@ test_move(krb5_context context, const char *type)
     krb5_ccache fromid, toid;
     krb5_error_code ret;
     krb5_principal p, p2;
+    krb5_creds cred, tocred;
 
     ops = krb5_cc_get_prefix_ops(context, type);
     if (ops == NULL)
@@ -525,13 +535,24 @@ test_move(krb5_context context, const char *type)
     if (ret)
 	krb5_err(context, 1, ret, "krb5_cc_initialize");
 
+    memset(&cred, 0, sizeof(cred));
+    ret = krb5_parse_name(context, "krbtgt/SU.SE@SU.SE", &cred.server);
+    if (ret)
+	krb5_err(context, 1, ret, "krb5_parse_name");
+    ret = krb5_parse_name(context, "lha@SU.SE", &cred.client);
+    if (ret)
+	krb5_err(context, 1, ret, "krb5_parse_name");
+
+    ret = krb5_cc_store_cred(context, fromid, &cred);
+    if (ret)
+	krb5_err(context, 1, ret, "krb5_cc_store_cred");
+
+
     ret = krb5_cc_new_unique(context, type, NULL, &toid);
     if (ret)
 	krb5_err(context, 1, ret, "krb5_cc_new_unique");
 
-    ret = krb5_cc_initialize(context, toid, p);
-    if (ret)
-	krb5_err(context, 1, ret, "krb5_cc_initialize");
+    ret = krb5_cc_move(context, fromid, toid);
 
     ret = krb5_cc_get_principal(context, toid, &p2);
     if (ret)
@@ -540,11 +561,15 @@ test_move(krb5_context context, const char *type)
     if (krb5_principal_compare(context, p, p2) == FALSE)
 	krb5_errx(context, 1, "p != p2");
 
+    ret = krb5_cc_retrieve_cred(context, toid, 0, &cred, &tocred);
+    if (ret)
+	krb5_errx(context, 1, "move failed");
+    krb5_free_cred_contents(context, &cred);
+    krb5_free_cred_contents(context, &tocred);
+
     krb5_free_principal(context, p);
     krb5_free_principal(context, p2);
-
     krb5_cc_destroy(context, toid);
-    krb5_cc_destroy(context, fromid);
 }
 
 
@@ -843,3 +868,12 @@ main(int argc, char **argv)
 
     return 0;
 }
+
+#else
+int
+main(int argc, char **argv)
+{
+
+    return 0;
+}
+#endif

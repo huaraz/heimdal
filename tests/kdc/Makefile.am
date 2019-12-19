@@ -11,6 +11,7 @@ noinst_DATA = \
 	krb5-hdb-mitdb.conf \
 	krb5-weak.conf \
 	krb5-pkinit.conf \
+	krb5-bx509.conf \
 	krb5-pkinit-win.conf \
 	krb5-slave2.conf \
 	krb5-slave.conf
@@ -32,6 +33,7 @@ SCRIPT_TESTS = \
 	check-keys \
 	check-kpasswdd \
 	check-pkinit \
+	check-bx509 \
 	check-iprop \
 	check-referral \
 	check-tester \
@@ -42,6 +44,7 @@ TESTS = $(SCRIPT_TESTS)
 port = 49188
 admport = 49189
 pwport = 49190
+bx509port = 49191
 
 if HAVE_DLOPEN
 do_dlopen = -e 's,[@]DLOPEN[@],true,g'
@@ -55,6 +58,7 @@ do_subst = $(heim_verbose)sed $(do_dlopen) \
 	-e 's,[@]srcdir[@],$(srcdir),g' \
 	-e 's,[@]port[@],$(port),g' \
 	-e 's,[@]admport[@],$(admport),g' \
+	-e 's,[@]bx509port[@],$(bx509port),g' \
 	-e 's,[@]pwport[@],$(pwport),g' \
 	-e 's,[@]objdir[@],$(top_builddir)/tests/kdc,g' \
 	-e 's,[@]top_builddir[@],$(top_builddir),g' \
@@ -141,6 +145,11 @@ check-pkinit: check-pkinit.in Makefile krb5-pkinit.conf
 	$(chmod) +x check-pkinit.tmp && \
 	mv check-pkinit.tmp check-pkinit
 
+check-bx509: check-bx509.in Makefile krb5-bx509.conf
+	$(do_subst) < $(srcdir)/check-bx509.in > check-bx509.tmp && \
+	$(chmod) +x check-bx509.tmp && \
+	mv check-bx509.tmp check-bx509
+
 check-iprop: check-iprop.in Makefile krb5.conf krb5-slave.conf krb5-slave2.conf
 	$(do_subst) < $(srcdir)/check-iprop.in > check-iprop.tmp && \
 	$(chmod) +x check-iprop.tmp && \
@@ -226,12 +235,21 @@ krb5-pkinit.conf: krb5-pkinit.conf.in Makefile
 	$(do_subst) -e 's,[@]w2k[@],no,g' < $(srcdir)/krb5-pkinit.conf.in > krb5-pkinit.conf.tmp && \
 	mv krb5-pkinit.conf.tmp krb5-pkinit.conf
 
+krb5-bx509.conf: krb5-bx509.conf.in Makefile
+	$(do_subst) -e 's,[@]w2k[@],no,g' < $(srcdir)/krb5-bx509.conf.in > krb5-bx509.conf.tmp && \
+	mv krb5-bx509.conf.tmp krb5-bx509.conf
+
 krb5-pkinit-win.conf: krb5-pkinit.conf.in Makefile
 	$(do_subst) -e 's,[@]w2k[@],yes,g' < $(srcdir)/krb5-pkinit.conf.in > krb5-pkinit-win.conf.tmp && \
 	mv krb5-pkinit-win.conf.tmp krb5-pkinit-win.conf
 
 CLEANFILES= \
 	$(TESTS) \
+	*.crt \
+	*.der \
+	*.log \
+	*.pem \
+	*.pid \
 	*.tmp \
 	acache.krb5 \
 	barpassword \
@@ -239,7 +257,6 @@ CLEANFILES= \
 	cache.krb5 \
 	cdigest-reply \
 	client-cache \
-	current*.log \
 	current-db* \
 	digest-reply \
 	foopassword \
@@ -248,7 +265,6 @@ CLEANFILES= \
 	iprop.keytab \
 	ipropd.dumpfile \
 	kdc-tester4.json \
-	kdc.crt \
 	krb5-authz.conf \
 	krb5-authz2.conf \
 	krb5-canon.conf \
@@ -257,6 +273,7 @@ CLEANFILES= \
 	krb5-hdb-mitdb.conf \
 	krb5-pkinit-win.conf \
 	krb5-pkinit.conf \
+	krb5-bx509.conf \
 	krb5-slave2.conf \
 	krb5-slave.conf \
 	krb5-weak.conf \
@@ -267,18 +284,11 @@ CLEANFILES= \
 	malloc-log \
 	malloc-log-master \
 	malloc-log-slave \
-	messages.log \
+	notfoopassword \
 	o2cache.krb5 \
 	o2digest-reply \
 	ocache.krb5 \
 	out-log \
-	pkinit.crt \
-	pkinit2.crt \
-	pkinit3.crt \
-	pkinit4.crt \
-	req-kdc.der \
-	req-pkinit.der \
-	req-pkinit2.der \
 	s2digest-reply \
 	sdigest-init \
 	sdigest-reply \
@@ -307,6 +317,7 @@ EXTRA_DIST = \
 	check-keys.in \
 	check-kpasswdd.in \
 	check-pkinit.in \
+	check-bx509.in \
 	check-referral.in \
 	check-tester.in \
 	check-uu.in \
@@ -321,6 +332,7 @@ EXTRA_DIST = \
 	kdc-tester3.json \
 	kdc-tester4.json.in \
 	krb5-pkinit.conf.in \
+	krb5-bx509.conf.in \
 	krb5.conf.in \
 	krb5-authz.conf.in \
 	krb5-authz2.conf.in \

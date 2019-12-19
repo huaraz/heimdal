@@ -73,10 +73,12 @@ libroken_la_OBJS =			\
 	$(OBJ)\issuid.obj		\
 	$(OBJ)\localtime_r.obj		\
 	$(OBJ)\lstat.obj		\
+	$(OBJ)\memmem.obj 		\
 	$(OBJ)\memset_s.obj 		\
 	$(OBJ)\mkdir.obj                \
 	$(OBJ)\mini_inetd.obj		\
 	$(OBJ)\mkstemp.obj		\
+	$(OBJ)\mkostemp.obj		\
 	$(OBJ)\net_read.obj		\
 	$(OBJ)\net_write.obj		\
 	$(OBJ)\parse_bytes.obj		\
@@ -175,6 +177,7 @@ INCFILES = 			\
 !ifndef HAVE_STDINT_H
 	$(INCDIR)\stdint.h	\
 !endif
+	$(INCDIR)\versionsupport.h	\
 	$(INCDIR)\xdbm.h
 
 clean::

@@ -43,9 +43,9 @@
 struct hx509_ca_tbs {
     hx509_name subject;
     SubjectPublicKeyInfo spki;
+    KeyUsage ku;
     ExtKeyUsage eku;
     GeneralNames san;
-    unsigned key_usage;
     heim_integer serial;
     struct {
 	unsigned int proxy:1;
@@ -108,7 +108,8 @@ hx509_ca_tbs_free(hx509_ca_tbs *tbs)
     free_CRLDistributionPoints(&(*tbs)->crldp);
     der_free_bit_string(&(*tbs)->subjectUniqueID);
     der_free_bit_string(&(*tbs)->issuerUniqueID);
-    hx509_name_free(&(*tbs)->subject);
+    if ((*tbs)->subject)
+        hx509_name_free(&(*tbs)->subject);
     if ((*tbs)->sigalg) {
 	free_AlgorithmIdentifier((*tbs)->sigalg);
 	free((*tbs)->sigalg);
@@ -262,11 +263,9 @@ hx509_ca_tbs_set_template(hx509_context context,
 	    return ret;
     }
     if (flags & HX509_CA_TEMPLATE_KU) {
-	KeyUsage ku;
-	ret = _hx509_cert_get_keyusage(context, cert, &ku);
+	ret = _hx509_cert_get_keyusage(context, cert, &tbs->ku);
 	if (ret)
 	    return ret;
-	tbs->key_usage = KeyUsage2int(ku);
     }
     if (flags & HX509_CA_TEMPLATE_EKU) {
 	ExtKeyUsage eku;
@@ -403,6 +402,87 @@ hx509_ca_tbs_set_serialnumber(hx509_context context,
     ret = der_copy_heim_integer(serialNumber, &tbs->serial);
     tbs->flags.serial = !ret;
     return ret;
+}
+
+/**
+ * Copy elements of a CSR into a TBS, but only if all of them are authorized.
+ *
+ * @param context A hx509 context.
+ * @param tbs object to be signed.
+ * @param req CSR
+ *
+ * @return An hx509 error code, see hx509_get_error_string().
+ *
+ * @ingroup hx509_ca
+ */
+
+HX509_LIB_FUNCTION int HX509_LIB_CALL
+hx509_ca_tbs_set_from_csr(hx509_context context,
+	                  hx509_ca_tbs tbs,
+	                  hx509_request req)
+{
+    hx509_san_type san_type;
+    heim_oid oid = { 0, 0 };
+    KeyUsage ku;
+    size_t i;
+    char *s = NULL;
+    int ret;
+
+    if (hx509_request_count_unauthorized(req)) {
+        hx509_set_error_string(context, 0, ENOMEM, "out of memory");
+        return EACCES;
+    }
+
+    ret = hx509_request_get_ku(context, req, &ku);
+    if (ret == 0 && KeyUsage2int(ku))
+        ret = hx509_ca_tbs_add_ku(context, tbs, ku);
+
+    for (i = 0; ret == 0; i++) {
+        free(s); s = NULL;
+        der_free_oid(&oid);
+        ret = hx509_request_get_eku(req, i, &s);
+        if (ret == 0)
+            ret = der_parse_heim_oid(s, ".", &oid);
+        if (ret == 0)
+            ret = hx509_ca_tbs_add_eku(context, tbs, &oid);
+    }
+    if (ret == HX509_NO_ITEM)
+        ret = 0;
+
+    for (i = 0; ret == 0; i++) {
+        free(s); s = NULL;
+        ret = hx509_request_get_san(req, i, &san_type, &s);
+        if (ret == 0)
+            ret = hx509_ca_tbs_add_san(context, tbs, san_type, s);
+    }
+    if (ret == HX509_NO_ITEM)
+        ret = 0;
+
+    der_free_oid(&oid);
+    free(s);
+    return ret;
+}
+
+/**
+ * An an extended key usage to the to-be-signed certificate object.
+ * Duplicates will detected and not added.
+ *
+ * @param context A hx509 context.
+ * @param tbs object to be signed.
+ * @param oid extended key usage to add.
+ *
+ * @return An hx509 error code, see hx509_get_error_string().
+ *
+ * @ingroup hx509_ca
+ */
+
+HX509_LIB_FUNCTION int HX509_LIB_CALL
+hx509_ca_tbs_add_ku(hx509_context context,
+		    hx509_ca_tbs tbs,
+		    KeyUsage ku)
+{
+    tbs->ku = ku;
+    return 0;
 }
 
 /**
@@ -583,6 +663,145 @@ hx509_ca_tbs_add_san_otherName(hx509_context context,
     return add_GeneralNames(&tbs->san, &gn);
 }
 
+static
+int
+dequote_strndup(hx509_context context, const char *in, size_t len, char **out)
+{
+    size_t i, k;
+    char *s;
+
+    *out = NULL;
+    if ((s = malloc(len + 1)) == NULL) {
+        hx509_set_error_string(context, 0, ENOMEM, "malloc: out of memory");
+        return ENOMEM;
+    }
+
+    for (k = i = 0; i < len; i++) {
+        if (in[i] == '\\') {
+            switch (in[++i]) {
+            case 't': s[k++] = '\t'; break;
+            case 'b': s[k++] = '\b'; break;
+            case 'n': s[k++] = '\n'; break;
+            case '0':
+                for (i++; i < len; i++) {
+                    if (in[i] == '\0')
+                        break;
+                    if (in[i++] == '\\' && in[i] == '0')
+                        continue;
+                    hx509_set_error_string(context, 0,
+                                           HX509_PARSING_NAME_FAILED,
+                                           "embedded NULs not supported in "
+                                           "PKINIT SANs");
+                    free(s);
+                    return HX509_PARSING_NAME_FAILED;
+                }
+                break;
+            case '\0':
+                hx509_set_error_string(context, 0,
+                                       HX509_PARSING_NAME_FAILED,
+                                       "trailing unquoted backslashes not "
+                                       "allowed in PKINIT SANs");
+                free(s);
+                return HX509_PARSING_NAME_FAILED;
+            default:  s[k++] = in[i]; break;
+            }
+        } else {
+            s[k++] = in[i];
+        }
+    }
+    s[k] = '\0';
+
+    *out = s;
+    return 0;
+}
+
+int
+_hx509_make_pkinit_san(hx509_context context,
+                       const char *principal,
+                       heim_octet_string *os)
+{
+    KRB5PrincipalName p;
+    size_t size;
+    int ret;
+
+    os->data = NULL;
+    os->length = 0;
+    memset(&p, 0, sizeof(p));
+
+    /* Parse principal */
+    {
+	const char *str, *str_start;
+        size_t n, i;
+
+	/* Count number of components */
+	n = 1;
+	for (str = principal; *str != '\0' && *str != '@'; str++) {
+	    if (*str == '\\') {
+		if (str[1] == '\0') {
+		    ret = HX509_PARSING_NAME_FAILED;
+		    hx509_set_error_string(context, 0, ret,
+					   "trailing \\ in principal name");
+		    goto out;
+		}
+		str++;
+	    } else if(*str == '/') {
+		n++;
+	    } else if(*str == '@') {
+		break;
+            }
+	}
+	if (*str != '@') {
+            /* Note that we allow the realm to be empty */
+	    ret = HX509_PARSING_NAME_FAILED;
+	    hx509_set_error_string(context, 0, ret, "Missing @ in principal");
+	    goto out;
+	};
+
+	p.principalName.name_string.val =
+	    calloc(n, sizeof(*p.principalName.name_string.val));
+	if (p.principalName.name_string.val == NULL) {
+	    ret = ENOMEM;
+	    hx509_set_error_string(context, 0, ret, "malloc: out of memory");
+	    goto out;
+	}
+	p.principalName.name_string.len = n;
+	p.principalName.name_type = KRB5_NT_PRINCIPAL;
+
+	for (i = 0, str_start = str = principal; *str != '\0'; str++) {
+	    if (*str=='\\') {
+		str++;
+	    } else if(*str == '/') {
+                /* Note that we allow components to be empty */
+                ret = dequote_strndup(context, str_start, str - str_start,
+                                      &p.principalName.name_string.val[i++]);
+                if (ret)
+                    goto out;
+                str_start = str + 1;
+	    } else if(*str == '@') {
+                ret = dequote_strndup(context, str_start, str - str_start,
+                                      &p.principalName.name_string.val[i++]);
+                if (ret == 0)
+                    ret = dequote_strndup(context, str + 1, strlen(str + 1), &p.realm);
+                if (ret)
+                    goto out;
+                break;
+            }
+	}
+    }
+
+    ASN1_MALLOC_ENCODE(KRB5PrincipalName, os->data, os->length, &p, &size, ret);
+    if (ret) {
+	hx509_set_error_string(context, 0, ret, "Out of memory");
+	goto out;
+    }
+    if (size != os->length)
+	_hx509_abort("internal ASN.1 encoder error");
+
+out:
+    free_KRB5PrincipalName(&p);
+    return ret;
+}
+
 /**
  * Add Kerberos Subject Alternative Name to the to-be-signed
  * certificate object. The principal string is a UTF8 string.
@@ -602,84 +821,13 @@ hx509_ca_tbs_add_san_pkinit(hx509_context context,
 			    const char *principal)
 {
     heim_octet_string os;
-    KRB5PrincipalName p;
-    size_t size;
     int ret;
-    char *s = NULL;
 
-    memset(&p, 0, sizeof(p));
-
-    /* parse principal */
-    {
-	const char *str;
-	char *q;
-	int n;
-
-	/* count number of component */
-	n = 1;
-	for(str = principal; *str != '\0' && *str != '@'; str++){
-	    if(*str=='\\'){
-		if(str[1] == '\0' || str[1] == '@') {
-		    ret = HX509_PARSING_NAME_FAILED;
-		    hx509_set_error_string(context, 0, ret,
-					   "trailing \\ in principal name");
-		    goto out;
-		}
-		str++;
-	    } else if(*str == '/')
-		n++;
-	}
-	p.principalName.name_string.val =
-	    calloc(n, sizeof(*p.principalName.name_string.val));
-	if (p.principalName.name_string.val == NULL) {
-	    ret = ENOMEM;
-	    hx509_set_error_string(context, 0, ret, "malloc: out of memory");
-	    goto out;
-	}
-	p.principalName.name_string.len = n;
-
-	p.principalName.name_type = KRB5_NT_PRINCIPAL;
-	q = s = strdup(principal);
-	if (q == NULL) {
-	    ret = ENOMEM;
-	    hx509_set_error_string(context, 0, ret, "malloc: out of memory");
-	    goto out;
-	}
-	p.realm = strrchr(q, '@');
-	if (p.realm == NULL) {
-	    ret = HX509_PARSING_NAME_FAILED;
-	    hx509_set_error_string(context, 0, ret, "Missing @ in principal");
-	    goto out;
-	};
-	*p.realm++ = '\0';
-
-	n = 0;
-	while (q) {
-	    p.principalName.name_string.val[n++] = q;
-	    q = strchr(q, '/');
-	    if (q)
-		*q++ = '\0';
-	}
-    }
-
-    ASN1_MALLOC_ENCODE(KRB5PrincipalName, os.data, os.length, &p, &size, ret);
-    if (ret) {
-	hx509_set_error_string(context, 0, ret, "Out of memory");
-	goto out;
-    }
-    if (size != os.length)
-	_hx509_abort("internal ASN.1 encoder error");
-
-    ret = hx509_ca_tbs_add_san_otherName(context,
-					 tbs,
-					 &asn1_oid_id_pkinit_san,
-					 &os);
+    ret = _hx509_make_pkinit_san(context, principal, &os);
+    if (ret == 0)
+        ret = hx509_ca_tbs_add_san_otherName(context, tbs,
+                                             &asn1_oid_id_pkinit_san, &os);
     free(os.data);
-out:
-    if (p.principalName.name_string.val)
-	free (p.principalName.name_string.val);
-    if (s)
-	free(s);
     return ret;
 }
 
@@ -821,6 +969,45 @@ hx509_ca_tbs_add_san_rfc822name(hx509_context context,
 }
 
 /**
+ * Add a Subject Alternative Name of the given type to the
+ * to-be-signed certificate object.
+ *
+ * @param context A hx509 context.
+ * @param tbs object to be signed.
+ * @param rfc822Name a string to a email address.
+ *
+ * @return An hx509 error code, see hx509_get_error_string().
+ *
+ * @ingroup hx509_ca
+ */
+
+HX509_LIB_FUNCTION int HX509_LIB_CALL
+hx509_ca_tbs_add_san(hx509_context context,
+                     hx509_ca_tbs tbs,
+                     hx509_san_type type,
+                     const char *s)
+{
+    switch (type) {
+    case HX509_SAN_TYPE_EMAIL:
+        return hx509_ca_tbs_add_san_rfc822name(context, tbs, s);
+    case HX509_SAN_TYPE_DNSNAME:
+        return hx509_ca_tbs_add_san_hostname(context, tbs, s);
+    case HX509_SAN_TYPE_DN:
+        return ENOTSUP;
+    case HX509_SAN_TYPE_REGISTERED_ID:
+        return ENOTSUP;
+    case HX509_SAN_TYPE_XMPP:
+        return hx509_ca_tbs_add_san_jid(context, tbs, s);
+    case HX509_SAN_TYPE_PKINIT:
+        return hx509_ca_tbs_add_san_pkinit(context, tbs, s);
+    case HX509_SAN_TYPE_MS_UPN:
+        return hx509_ca_tbs_add_san_ms_upn(context, tbs, s);
+    default:
+        return ENOTSUP;
+    }
+}
+
+/**
  * Set the subject name of a to-be-signed certificate object.
  *
  * @param context A hx509 context.
@@ -906,6 +1093,23 @@ hx509_ca_tbs_subject_expand(hx509_context context,
 			    hx509_env env)
 {
     return hx509_name_expand(context, tbs->subject, env);
+}
+
+/**
+ * Get the name of a to-be-signed certificate object.
+ *
+ * @param context A hx509 context.
+ * @param tbs object to be signed.
+ *
+ * @return An hx509 name.
+ *
+ * @ingroup hx509_ca
+ */
+
+HX509_LIB_FUNCTION hx509_name HX509_LIB_CALL
+hx509_ca_tbs_get_name(hx509_ca_tbs tbs)
+{
+    return tbs->subject;
 }
 
 /**
@@ -1033,7 +1237,6 @@ ca_sign(hx509_context context,
     const AlgorithmIdentifier *sigalg;
     time_t notBefore;
     time_t notAfter;
-    unsigned key_usage;
 
     sigalg = tbs->sigalg;
     if (sigalg == NULL)
@@ -1053,21 +1256,12 @@ ca_sign(hx509_context context,
     if (notAfter == 0)
 	notAfter = time(NULL) + 3600 * 24 * 365;
 
-    key_usage = tbs->key_usage;
-    if (key_usage == 0) {
-	KeyUsage ku;
-	memset(&ku, 0, sizeof(ku));
-	ku.digitalSignature = 1;
-	ku.keyEncipherment = 1;
-	key_usage = KeyUsage2int(ku);
-    }
-
     if (tbs->flags.ca) {
-	KeyUsage ku;
-	memset(&ku, 0, sizeof(ku));
-	ku.keyCertSign = 1;
-	ku.cRLSign = 1;
-	key_usage |= KeyUsage2int(ku);
+	tbs->ku.keyCertSign = 1;
+	tbs->ku.cRLSign = 1;
+    } else if (KeyUsage2int(tbs->ku) == 0) {
+	tbs->ku.digitalSignature = 1;
+	tbs->ku.keyEncipherment = 1;
     }
 
     /*
@@ -1076,6 +1270,12 @@ ca_sign(hx509_context context,
 
     tbsc = &c.tbsCertificate;
 
+    /* Default subject Name to empty */
+    if (tbs->subject == NULL &&
+        (ret = hx509_empty_name(context, &tbs->subject)))
+        return ret;
+
+    /* Sanity checks */
     if (tbs->flags.key == 0) {
 	ret = EINVAL;
 	hx509_set_error_string(context, 0, ret, "No public key set");
@@ -1086,13 +1286,9 @@ ca_sign(hx509_context context,
      * will be generated below.
      */
     if (!tbs->flags.proxy) {
-	if (tbs->subject == NULL) {
-	    hx509_set_error_string(context, 0, EINVAL, "No subject name set");
-	    return EINVAL;
-	}
 	if (hx509_name_is_null_p(tbs->subject) && tbs->san.len == 0) {
 	    hx509_set_error_string(context, 0, EINVAL,
-				   "NULL subject and no SubjectAltNames");
+				   "Empty subject and no SubjectAltNames");
 	    return EINVAL;
 	}
     }
@@ -1237,11 +1433,9 @@ ca_sign(hx509_context context,
     }
 
     /* add KeyUsage */
-    {
-	KeyUsage ku;
-
-	ku = int2KeyUsage(key_usage);
-	ASN1_MALLOC_ENCODE(KeyUsage, data.data, data.length, &ku, &size, ret);
+    if (KeyUsage2int(tbs->ku) > 0) {
+        ASN1_MALLOC_ENCODE(KeyUsage, data.data, data.length,
+                           &tbs->ku, &size, ret);
 	if (ret) {
 	    hx509_set_error_string(context, 0, ret, "Out of memory");
 	    goto out;
@@ -1265,7 +1459,7 @@ ca_sign(hx509_context context,
 	}
 	if (size != data.length)
 	    _hx509_abort("internal ASN.1 encoder error");
-	ret = add_extension(context, tbsc, 0,
+	ret = add_extension(context, tbsc, 1,
 			    &asn1_oid_id_x509_ce_extKeyUsage, &data);
 	free(data.data);
 	if (ret)
@@ -1282,9 +1476,10 @@ ca_sign(hx509_context context,
 	}
 	if (size != data.length)
 	    _hx509_abort("internal ASN.1 encoder error");
-	ret = add_extension(context, tbsc, 0,
-			    &asn1_oid_id_x509_ce_subjectAltName,
-			    &data);
+
+        /* The SAN extension is critical if the subject Name is empty */
+        ret = add_extension(context, tbsc, hx509_name_is_null_p(tbs->subject),
+                            &asn1_oid_id_x509_ce_subjectAltName, &data);
 	free(data.data);
 	if (ret)
 	    goto out;
