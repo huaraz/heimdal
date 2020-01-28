@@ -499,7 +499,7 @@ bad_401(struct bx509_request_desc *r, char *reason)
 static krb5_error_code
 bad_403(struct bx509_request_desc *r, krb5_error_code ret, char *reason)
 {
-    return bad_req(r, EACCES, MHD_HTTP_FORBIDDEN, "%s", reason);
+    return bad_req(r, ret, MHD_HTTP_FORBIDDEN, "%s", reason);
 }
 
 static krb5_error_code
@@ -690,19 +690,33 @@ do_CA(struct bx509_request_desc *r, const char *csr)
     hx509_certs certs = NULL;
     krb5_data d;
     ssize_t bytes;
+    char *csr2, *q;
+
+    /*
+     * Work around bug where microhttpd decodes %2b to + then + to space.  That
+     * bug does not affect other base64 special characters that get URI
+     * %-encoded.
+     */
+    if ((csr2 = strdup(csr)) == NULL)
+        return bad_enomem(r, ENOMEM);
+    for (q = strchr(csr2, ' '); q; q = strchr(q + 1, ' '))
+        *q = '+';
 
     ret = krb5_parse_name(r->context, r->cname, &p);
-    if (ret)
+    if (ret) {
+        free(csr2);
         return bad_req(r, ret, MHD_HTTP_SERVICE_UNAVAILABLE,
                        "Could not parse principal name");
+    }
 
     /* Set CSR */
-    if ((d.data = malloc(strlen(csr))) == NULL) {
+    if ((d.data = malloc(strlen(csr2))) == NULL) {
         krb5_free_principal(r->context, p);
         return bad_enomem(r, ENOMEM);
     }
 
-    bytes = rk_base64_decode(csr, d.data);
+    bytes = rk_base64_decode(csr2, d.data);
+    free(csr2);
     if (bytes < 0)
         ret = errno;
     else
@@ -1201,9 +1215,9 @@ bnegotiate_do_CA(struct bx509_request_desc *r)
     hx509_request_free(&req);
     p = NULL;
 
-    if (ret == KRB5KDC_ERR_POLICY) {
+    if (ret == KRB5KDC_ERR_POLICY || ret == EACCES) {
         hx509_private_key_free(&key);
-        return bad_500(r, ret,
+        return bad_403(r, ret,
                        "Certificate request denied for policy reasons");
     }
     if (ret == ENOMEM) {
@@ -1540,6 +1554,19 @@ bnegotiate(struct bx509_request_desc *r)
     return ret;
 }
 
+static krb5_error_code
+health(const char *method, struct bx509_request_desc *r)
+{
+    if (strcmp(method, "HEAD") == 0)
+        return resp(r, MHD_HTTP_OK, MHD_RESPMEM_PERSISTENT, "", 0, NULL);
+    return resp(r, MHD_HTTP_OK, MHD_RESPMEM_PERSISTENT,
+                "To determine the health of the service, use the /bx509 "
+                "end-point.\n",
+                sizeof("To determine the health of the service, use the "
+                       "/bx509 end-point.\n") - 1, NULL);
+
+}
+
 /* Implements the entirety of this REST service */
 static int
 route(void *cls,
@@ -1574,7 +1601,10 @@ route(void *cls,
 
     if ((ret = set_req_desc(connection, url, &r)))
         return bad_503(&r, ret, "Could not initialize request state");
-    if (strcmp(method, "GET") != 0)
+    if ((strcmp(method, "HEAD") == 0 || strcmp(method, "GET") == 0) &&
+        (strcmp(url, "/health") == 0 || strcmp(url, "/") == 0))
+        ret = health(method, &r);
+    else if (strcmp(method, "GET") != 0)
         ret = bad_405(&r, method);
     else if (strcmp(url, "/bx509") == 0)
         ret = bx509(&r);
