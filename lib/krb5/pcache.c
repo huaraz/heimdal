@@ -60,7 +60,7 @@ cc_plugin_register_to_context(krb5_context context, const void *plug, void *plug
 
 static const char *ccache_plugin_deps[] = { "krb5", NULL };
 
-static struct krb5_plugin_data
+static struct heim_plugin_data
 ccache_plugin_data = {
     "krb5",
     KRB5_PLUGIN_CCACHE,

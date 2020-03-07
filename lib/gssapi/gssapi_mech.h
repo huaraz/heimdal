@@ -475,6 +475,17 @@ _gss_store_cred_into_t(OM_uint32 *minor_status,
 		       gss_cred_usage_t *cred_usage_stored);
 
 typedef OM_uint32 GSSAPI_CALLCONV
+_gss_store_cred_into2_t(OM_uint32 *minor_status,
+		        gss_const_cred_id_t input_cred_handle,
+		        gss_cred_usage_t input_usage,
+		        gss_OID desired_mech,
+		        OM_uint32 store_cred_flags,
+		        gss_const_key_value_set_t cred_store,
+		        gss_OID_set *elements_stored,
+		        gss_cred_usage_t *cred_usage_stored,
+                        gss_buffer_set_t *env);
+
+typedef OM_uint32 GSSAPI_CALLCONV
 _gss_set_neg_mechs_t(OM_uint32 *minor_status,
 		     gss_cred_id_t cred_handle,
 		     const gss_OID_set mechs);
@@ -483,6 +494,29 @@ typedef OM_uint32 GSSAPI_CALLCONV
 _gss_get_neg_mechs_t(OM_uint32 *minor_status,
 		     gss_const_cred_id_t cred_handle,
 		     gss_OID_set *mechs);
+
+typedef OM_uint32 GSSAPI_CALLCONV
+_gss_query_mechanism_info_t(OM_uint32 *minor_status,
+			    gss_const_OID mech_oid,
+			    unsigned char auth_scheme[16]);
+
+typedef OM_uint32 GSSAPI_CALLCONV
+_gss_query_meta_data_t(OM_uint32 *minor_status,
+		       gss_const_OID mech_oid,
+		       gss_cred_id_t cred_handle,
+		       gss_ctx_id_t *ctx_handle,
+		       gss_const_name_t targ_name,
+		       OM_uint32 req_flags,
+		       gss_buffer_t meta_data);
+
+typedef OM_uint32 GSSAPI_CALLCONV
+_gss_exchange_meta_data_t(OM_uint32 *minor_status,
+			  gss_const_OID mech_oid,
+			  gss_cred_id_t cred_handle,
+			  gss_ctx_id_t *ctx_handle,
+			  gss_const_name_t targ_name,
+			  OM_uint32 req_flags,
+			  gss_const_buffer_t meta_data);
 
 /*
  *
@@ -518,6 +552,9 @@ typedef OM_uint32 GSSAPI_CALLCONV _gss_authorize_localname_t (
 	       gss_const_buffer_t,	/* user */
 	       gss_const_OID		/* user_name_type */
 	      );
+
+struct _gss_name;
+struct _gss_cred;
 
 /* mechglue internal */
 struct gss_mech_compat_desc_struct;
@@ -594,6 +631,10 @@ typedef struct gssapi_mech_interface_desc {
 	_gss_store_cred_into_t		*gm_store_cred_into;
 	_gss_set_neg_mechs_t		*gm_set_neg_mechs;
 	_gss_get_neg_mechs_t		*gm_get_neg_mechs;
+	_gss_query_mechanism_info_t	*gm_query_mechanism_info;
+	_gss_query_meta_data_t		*gm_query_meta_data;
+	_gss_exchange_meta_data_t	*gm_exchange_meta_data;
+	_gss_store_cred_into2_t		*gm_store_cred_into2;
         struct gss_mech_compat_desc_struct  *gm_compat;
 } gssapi_mech_interface_desc, *gssapi_mech_interface;
 
@@ -613,6 +654,12 @@ int _gss_mo_get_option_1(gss_const_OID, gss_mo_desc *, gss_buffer_t);
 int _gss_mo_get_option_0(gss_const_OID, gss_mo_desc *, gss_buffer_t);
 int _gss_mo_get_ctx_as_string(gss_const_OID, gss_mo_desc *, gss_buffer_t);
 
+struct _gss_name_type {
+    gss_OID    gnt_name_type;
+    OM_uint32  (*gnt_parse)(OM_uint32 *, gss_const_OID, const gss_buffer_t,
+			    gss_const_OID, gss_name_t *);
+};
+
 struct _gss_oid_name_table {
     gss_OID oid;
     const char *name;
@@ -622,5 +669,55 @@ struct _gss_oid_name_table {
 
 extern struct _gss_oid_name_table _gss_ont_mech[];
 extern struct _gss_oid_name_table _gss_ont_ma[];
+
+int
+_gss_mg_log_level(int level);
+
+void
+_gss_mg_log(int level, const char *fmt, ...)
+    HEIMDAL_PRINTF_ATTRIBUTE((printf, 2, 3));
+
+void
+_gss_mg_log_name(int level,
+		 struct _gss_name *name,
+		 gss_OID mech_type,
+		 const char *fmt, ...);
+
+void
+_gss_mg_log_cred(int level,
+		 struct _gss_cred *cred,
+		 const char *fmt, ...);
+
+
+void
+_gss_load_plugins(void);
+
+gss_iov_buffer_desc *
+_gss_mg_find_buffer(gss_iov_buffer_desc *iov,
+		    int iov_count,
+		    OM_uint32 type);
+
+OM_uint32
+_gss_mg_allocate_buffer(OM_uint32 *minor_status,
+			gss_iov_buffer_desc *buffer,
+			size_t size);
+
+OM_uint32
+gss_mg_set_error_string(gss_OID mech,
+                       OM_uint32 maj, OM_uint32 min,
+                       const char *fmt, ...);
+
+gss_cred_id_t
+_gss_mg_find_mech_cred(gss_const_cred_id_t cred_handle,
+		       gss_const_OID mech_type);
+
+#include <krb5.h>
+
+/*
+ * Mechglue krb5 context for use by NegoEx. This is not shared with the
+ * krb5 GSS mechanism so we don't clobber its error state.
+ */
+krb5_context
+_gss_mg_krb5_context(void);
 
 #endif /* GSSAPI_MECH_H */

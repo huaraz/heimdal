@@ -47,54 +47,16 @@ static krb5_error_code
 _warnerr(krb5_context context, int do_errtext,
 	 krb5_error_code code, int level, const char *fmt, va_list ap)
 {
-    char xfmt[7] = "";
-    const char *args[2], **arg;
-    char *msg = NULL;
-    const char *err_str = NULL;
-    krb5_error_code ret;
-
-    args[0] = args[1] = NULL;
-    arg = args;
-    if(fmt){
-	strlcat(xfmt, "%s", sizeof(xfmt));
-	if(do_errtext)
-	    strlcat(xfmt, ": ", sizeof(xfmt));
-	ret = vasprintf(&msg, fmt, ap);
-	if(ret < 0 || msg == NULL)
-	    return ENOMEM;
-	*arg++ = msg;
-    }
-    if(context && do_errtext){
-	strlcat(xfmt, "%s", sizeof(xfmt));
-
-	err_str = krb5_get_error_message(context, code);
-	if (err_str != NULL) {
-	    *arg = err_str;
-	} else {
-	    *arg= "<unknown error>";
-	}
-    }
-
-    if(context && context->warn_dest)
-	krb5_log(context, context->warn_dest, level, xfmt, args[0], args[1]);
+    if (do_errtext)
+        return heim_vwarn(context ? context->hcontext : NULL, code, fmt, ap);
     else
-	warnx(xfmt, args[0], args[1]);
-    free(msg);
-    krb5_free_error_message(context, err_str);
-    return 0;
+        return heim_vwarnx(context ? context->hcontext : NULL, fmt, ap);
 }
 
-#define FUNC(ETEXT, CODE, LEVEL)					\
-    krb5_error_code ret;						\
-    va_list ap;								\
-    va_start(ap, fmt);							\
-    ret = _warnerr(context, ETEXT, CODE, LEVEL, fmt, ap); 		\
-    va_end(ap);
-
-#define FUNC_NORET(ETEXT, CODE, LEVEL)					\
-    va_list ap;								\
-    va_start(ap, fmt);							\
-    (void) _warnerr(context, ETEXT, CODE, LEVEL, fmt, ap); 		\
+#define FUNC_NORET(ETEXT, CODE, LEVEL)                                 \
+    va_list ap;                                                        \
+    va_start(ap, fmt);                                                 \
+    (void) _warnerr(context, ETEXT, CODE, LEVEL, fmt, ap);             \
     va_end(ap);
 
 #undef __attribute__
@@ -117,7 +79,7 @@ krb5_vwarn(krb5_context context, krb5_error_code code,
 	   const char *fmt, va_list ap)
      __attribute__ ((__format__ (__printf__, 3, 0)))
 {
-    return _warnerr(context, 1, code, 1, fmt, ap);
+    return heim_vwarn(context ? context->hcontext : NULL, code, fmt, ap);
 }
 
 /**
@@ -135,7 +97,12 @@ KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_warn(krb5_context context, krb5_error_code code, const char *fmt, ...)
      __attribute__ ((__format__ (__printf__, 3, 4)))
 {
-    FUNC(1, code, 1);
+    krb5_error_code ret;
+    va_list ap;
+
+    va_start(ap, fmt);
+    ret = krb5_vwarn(context, code, fmt, ap);
+    va_end(ap);
     return ret;
 }
 
@@ -153,7 +120,7 @@ KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_vwarnx(krb5_context context, const char *fmt, va_list ap)
      __attribute__ ((__format__ (__printf__, 2, 0)))
 {
-    return _warnerr(context, 0, 0, 1, fmt, ap);
+    return heim_vwarnx(context ? context->hcontext : NULL, fmt, ap);
 }
 
 /**
@@ -169,7 +136,12 @@ KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_warnx(krb5_context context, const char *fmt, ...)
      __attribute__ ((__format__ (__printf__, 2, 3)))
 {
-    FUNC(0, 0, 1);
+    krb5_error_code ret;
+    va_list ap;
+
+    va_start(ap, fmt);
+    ret = krb5_vwarnx(context, fmt, ap);
+    va_end(ap);
     return ret;
 }
 
@@ -340,8 +312,7 @@ krb5_abortx(krb5_context context, const char *fmt, ...)
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_set_warn_dest(krb5_context context, krb5_log_facility *fac)
 {
-    context->warn_dest = fac;
-    return 0;
+    return heim_set_warn_dest(context->hcontext, fac);
 }
 
 /**
@@ -355,5 +326,5 @@ krb5_set_warn_dest(krb5_context context, krb5_log_facility *fac)
 KRB5_LIB_FUNCTION krb5_log_facility * KRB5_LIB_CALL
 krb5_get_warn_dest(krb5_context context)
 {
-    return context->warn_dest;
+    return heim_get_warn_dest(context->hcontext);
 }

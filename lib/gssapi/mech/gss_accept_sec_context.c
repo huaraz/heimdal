@@ -136,6 +136,8 @@ choose_mech(const gss_buffer_t input, gss_OID *mech_oid)
 		return GSS_S_COMPLETE;
 	}
 
+	_gss_mg_log(10, "Don't have client request mech");
+
 	return status;
 }
 
@@ -159,9 +161,9 @@ gss_accept_sec_context(OM_uint32 *minor_status,
 	struct _gss_cred *cred = (struct _gss_cred *) acceptor_cred_handle;
 	struct _gss_mechanism_cred *mc;
 	gss_const_cred_id_t acceptor_mc;
-	gss_cred_id_t delegated_mc;
-	gss_name_t src_mn;
-	gss_OID mech_ret_type = NULL;
+	gss_cred_id_t delegated_mc = GSS_C_NO_CREDENTIAL;
+	gss_name_t src_mn = GSS_C_NO_NAME;
+	gss_OID mech_ret_type = GSS_C_NO_OID;
 
 	*minor_status = 0;
 	if (src_name)
@@ -175,7 +177,6 @@ gss_accept_sec_context(OM_uint32 *minor_status,
 	if (delegated_cred_handle)
 	    *delegated_cred_handle = GSS_C_NO_CREDENTIAL;
 	_mg_buffer_zero(output_token);
-
 
 	/*
 	 * If this is the first call (*context_handle is NULL), we must
@@ -201,6 +202,7 @@ gss_accept_sec_context(OM_uint32 *minor_status,
 		m = ctx->gc_mech = __gss_get_mechanism(mech_oid);
 		if (!m) {
 			free(ctx);
+			_gss_mg_log(10, "mechanism client used is unknown");
 			return (GSS_S_BAD_MECH);
 		}
 		*context_handle = (gss_ctx_id_t) ctx;
@@ -208,19 +210,25 @@ gss_accept_sec_context(OM_uint32 *minor_status,
 		m = ctx->gc_mech;
 	}
 
-	if (cred) {
-		HEIM_SLIST_FOREACH(mc, &cred->gc_mc, gmc_link)
+	if (m->gm_flags & GM_USE_MG_CRED) {
+		acceptor_mc = acceptor_cred_handle;
+	} else if (cred) {
+		HEIM_TAILQ_FOREACH(mc, &cred->gc_mc, gmc_link)
 			if (mc->gmc_mech == m)
 				break;
 		if (!mc) {
 		        gss_delete_sec_context(&junk, context_handle, NULL);
+			_gss_mg_log(10, "gss-asc: client sent mech %s "
+				    "but no credential was matching",
+				    m->gm_name);
+			HEIM_TAILQ_FOREACH(mc, &cred->gc_mc, gmc_link)
+				_gss_mg_log(10, "gss-asc: available creds were %s", mc->gmc_mech->gm_name);
 			return (GSS_S_BAD_MECH);
 		}
 		acceptor_mc = mc->gmc_cred;
 	} else {
 		acceptor_mc = GSS_C_NO_CREDENTIAL;
 	}
-	delegated_mc = GSS_C_NO_CREDENTIAL;
 
 	mech_ret_flags = 0;
 	major_status = m->gm_accept_sec_context(minor_status,
@@ -263,9 +271,18 @@ gss_accept_sec_context(OM_uint32 *minor_status,
 
 	if (mech_ret_flags & GSS_C_DELEG_FLAG) {
 		if (!delegated_cred_handle) {
-			m->gm_release_cred(minor_status, &delegated_mc);
+			if (m->gm_flags	 & GM_USE_MG_CRED)
+				gss_release_cred(minor_status, &delegated_mc);
+			else
+				m->gm_release_cred(minor_status, &delegated_mc);
 			mech_ret_flags &=
 			    ~(GSS_C_DELEG_FLAG|GSS_C_DELEG_POLICY_FLAG);
+		} else if ((m->gm_flags & GM_USE_MG_CRED) != 0) {
+			/* 
+			 * If credential is uses mechglue cred, assume it
+			 * returns one too.
+			 */
+			*delegated_cred_handle = delegated_mc;
 		} else if (gss_oid_equal(mech_ret_type, &m->gm_mech_oid) == 0) {
 			/*
 			 * If the returned mech_type is not the same
@@ -295,11 +312,13 @@ gss_accept_sec_context(OM_uint32 *minor_status,
 			dmc->gmc_mech = m;
 			dmc->gmc_mech_oid = &m->gm_mech_oid;
 			dmc->gmc_cred = delegated_mc;
-			HEIM_SLIST_INSERT_HEAD(&dcred->gc_mc, dmc, gmc_link);
+			HEIM_TAILQ_INSERT_TAIL(&dcred->gc_mc, dmc, gmc_link);
 
 			*delegated_cred_handle = (gss_cred_id_t) dcred;
 		}
 	}
+
+	_gss_mg_log(10, "gss-asc: return %d/%d", (int)major_status, (int)*minor_status);
 
 	if (ret_flags)
 	    *ret_flags = mech_ret_flags;

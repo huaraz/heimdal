@@ -1,9 +1,7 @@
 /*
- * Copyright (c) 2006 - 2007 Kungliga Tekniska Högskolan
+ * Copyright (c) 1995, 1996, 1997 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
- *
- * Portions Copyright (c) 2018 AuriStor, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,37 +31,31 @@
  * SUCH DAMAGE.
  */
 
-#ifndef HEIMDAL_KRB5_COMMON_PLUGIN_H
-#define HEIMDAL_KRB5_COMMON_PLUGIN_H
+/* $Id$ */
 
-/*
- * All plugin function tables extend the following structure.
- */
-struct krb5_plugin_common_ftable_desc {
-    int			version;
-    krb5_error_code	(KRB5_LIB_CALL *init)(krb5_context, void **);
-    void		(KRB5_LIB_CALL *fini)(void *);
+#ifndef _BASE32_H_
+#define _BASE32_H_
+
+#ifndef ROKEN_LIB_FUNCTION
+#ifdef _WIN32
+#define ROKEN_LIB_FUNCTION
+#define ROKEN_LIB_CALL __cdecl
+#else
+#define ROKEN_LIB_FUNCTION
+#define ROKEN_LIB_CALL
+#endif
+#endif
+
+enum rk_base32_flags {
+    RK_BASE32_FLAG_PRESERVE_ORDER = 1,
+    RK_BASE32_FLAG_STOP_ON_GARBAGE = 2,
+    RK_BASE32_FLAG_INTERIOR_PADDING_OK = 4,
 };
-typedef struct krb5_plugin_common_ftable_desc krb5_plugin_common_ftable;
-typedef struct krb5_plugin_common_ftable_desc *krb5_plugin_common_ftable_p;
-typedef struct krb5_plugin_common_ftable_desc * const krb5_plugin_common_ftable_cp;
 
-typedef krb5_error_code
-(KRB5_CALLCONV krb5_plugin_load_ft)(krb5_context context,
-                                    krb5_get_instance_func_t *func,
-                                    size_t *n_ftables,
-                                    krb5_plugin_common_ftable_cp **ftables);
+ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
+rk_base32_encode(const void *, int, char **, enum rk_base32_flags);
 
-typedef krb5_plugin_load_ft *krb5_plugin_load_t;
+ROKEN_LIB_FUNCTION int ROKEN_LIB_CALL
+rk_base32_decode(const char *, void *, enum rk_base32_flags);
 
-/*
- * All plugins must export a function named "<type>_plugin_load" with
- * a signature of:
- *
- * krb5_error_code KRB5_CALLCONV
- * <type>_plugin_load(krb5_context context,
- *	              krb5_get_instance_func_t *func,
- *		      size_t *n_ftables,
- *		      const krb5_plugin_common_ftable *const **ftables);
- */
-#endif /* HEIMDAL_KRB5_COMMON_PLUGIN_H */
+#endif

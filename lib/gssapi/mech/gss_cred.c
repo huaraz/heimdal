@@ -63,9 +63,12 @@ gss_export_cred(OM_uint32 * minor_status,
 	return GSS_S_NO_CRED;
     }
 
-    HEIM_SLIST_FOREACH(mc, &cred->gc_mc, gmc_link) {
+    HEIM_TAILQ_FOREACH(mc, &cred->gc_mc, gmc_link) {
 	if (mc->gmc_mech->gm_export_cred == NULL) {
 	    *minor_status = 0;
+	    gss_mg_set_error_string(&mc->gmc_mech->gm_mech_oid,
+				    GSS_S_NO_CRED, *minor_status,
+				    "Credential doesn't support exporting");
 	    return GSS_S_NO_CRED;
 	}
     }
@@ -76,8 +79,7 @@ gss_export_cred(OM_uint32 * minor_status,
 	return GSS_S_FAILURE;
     }
 
-    HEIM_SLIST_FOREACH(mc, &cred->gc_mc, gmc_link) {
-
+    HEIM_TAILQ_FOREACH(mc, &cred->gc_mc, gmc_link) {
 	major = mc->gmc_mech->gm_export_cred(minor_status,
 					     mc->gmc_cred, &buffer);
 	if (major) {
@@ -85,12 +87,14 @@ gss_export_cred(OM_uint32 * minor_status,
 	    return major;
 	}
 
-	bytes = krb5_storage_write(sp, buffer.value, buffer.length);
-	if (bytes < 0 || (size_t)bytes != buffer.length) {
-	    gss_release_buffer(minor_status, &buffer);
-	    krb5_storage_free(sp);
-	    *minor_status = EINVAL;
-	    return GSS_S_FAILURE;
+	if (buffer.length) {
+	    bytes = krb5_storage_write(sp, buffer.value, buffer.length);
+	    if (bytes < 0 || (size_t)bytes != buffer.length) {
+		gss_release_buffer(minor_status, &buffer);
+		krb5_storage_free(sp);
+		*minor_status = EINVAL;
+		return GSS_S_FAILURE;
+	    }
 	}
 	gss_release_buffer(minor_status, &buffer);
     }
@@ -100,6 +104,14 @@ gss_export_cred(OM_uint32 * minor_status,
     if (ret) {
 	*minor_status = ret;
 	return GSS_S_FAILURE;
+    }
+
+    if (data.length == 0) {
+	*minor_status = 0;
+	gss_mg_set_error_string(GSS_C_NO_OID,
+				GSS_S_NO_CRED, *minor_status,
+				"Credential was not exportable");
+	return GSS_S_NO_CRED;
     }
 
     token->value = data.data;
@@ -201,12 +213,12 @@ gss_import_cred(OM_uint32 * minor_status,
 	mc->gmc_mech_oid = &m->gm_mech_oid;
 	mc->gmc_cred = mcred;
 
-	HEIM_SLIST_INSERT_HEAD(&cred->gc_mc, mc, gmc_link);
+	HEIM_TAILQ_INSERT_TAIL(&cred->gc_mc, mc, gmc_link);
     }
     krb5_storage_free(sp);
     sp = NULL;
 
-    if (HEIM_SLIST_EMPTY(&cred->gc_mc)) {
+    if (HEIM_TAILQ_EMPTY(&cred->gc_mc)) {
 	major = GSS_S_NO_CRED;
 	goto out;
     }

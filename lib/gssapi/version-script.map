@@ -84,11 +84,13 @@ HEIMDAL_GSS_2.0 {
 		gss_seal;
 		gss_set_cred_option;
 		gss_set_name_attribute;
+		gss_set_log_function;
 		gss_set_neg_mechs;
 		gss_set_sec_context_option;
 		gss_sign;
 		gss_store_cred;
 		gss_store_cred_into;
+		gss_store_cred_into2;
 		gss_test_oid_set_member;
 		gss_unseal;
 		gss_unwrap;
@@ -197,6 +199,9 @@ HEIMDAL_GSS_2.0 {
 		__gss_c_ma_pfs_oid_desc;
 		__gss_c_ma_compress_oid_desc;
 		__gss_c_ma_ctx_trans_oid_desc;
+		__gss_c_ma_negoex_and_spnego_oid_desc;
+		__gss_c_inq_negoex_key_oid_desc;
+		__gss_c_inq_negoex_verify_key_oid_desc;
 
 	local:
 		*;

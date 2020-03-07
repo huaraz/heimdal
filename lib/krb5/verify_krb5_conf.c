@@ -38,6 +38,9 @@
 
 /* verify krb5.conf */
 
+#define krb5_config_string  heim_config_string
+#define krb5_config_list    heim_config_list
+
 static int dumpconfig_flag = 0;
 static int version_flag = 0;
 static int help_flag	= 0;
@@ -407,6 +410,7 @@ struct entry libdefaults_entries[] = {
     { "default_client_keytab_name", krb5_config_string, NULL, 0 },
     { "default_cc_name", krb5_config_string, NULL, 0 },
     { "default_cc_type", krb5_config_string, NULL, 0 },
+    { "default_cc_collection", krb5_config_string, NULL, 0 },
     { "default_etypes", krb5_config_string, NULL, 0 },
     { "default_etypes_des", krb5_config_string, NULL, 0 },
     { "default_keytab_modify_name", krb5_config_string, NULL, 0 },
