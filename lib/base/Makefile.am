@@ -30,7 +30,7 @@ endif
 
 libheimbase_la_LIBADD = $(PTHREAD_LIBADD) $(LIB_dlopen) $(LIB_com_err)
 
-include_HEADERS	= heimbase.h common_plugin.h
+include_HEADERS	= heimbase.h common_plugin.h heimbase-svc.h
 
 ERR_FILES = heim_err.c
 
@@ -47,6 +47,7 @@ dist_libheimbase_la_SOURCES =	\
 	dict.c			\
 	$(IMPLEMENT_TLS)	\
 	error.c			\
+	error_string.c		\
 	expand_path.c		\
 	heimbase.c		\
 	heimbasepriv.h		\

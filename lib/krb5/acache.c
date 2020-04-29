@@ -450,7 +450,7 @@ acc_get_name(krb5_context context,
              const char **colname,
              const char **subsidiary)
 {
-    krb5_error_code ret;
+    krb5_error_code ret = 0;
     krb5_acc *a = ACACHE(id);
     int32_t error;
 
@@ -486,7 +486,7 @@ acc_get_name(krb5_context context,
     if (colname)
         *colname = "";
     if (subsidiary)
-    *subsidiary = a->cache_subsidiary;
+        *subsidiary = a->cache_subsidiary;
     return ret;
 }
 
@@ -538,7 +538,17 @@ acc_resolve(krb5_context context, krb5_ccache *id, const char *res, const char *
     a = ACACHE(*id);
 
     if (sub) {
-        if (asprintf(&s, "%s:%s", res, sub) == -1 || s == NULL ||
+        /*
+         * For API there's no such thing as a collection name, there's only the
+         * default collection.  Though we could perhaps put a CCAPI shared
+         * object path in the collection name.
+         *
+         * So we'll treat (res && !sub) and (!res && sub) as the same cases.
+         *
+         * See also the KCM ccache type, where we have similar considerations.
+         */
+        if (asprintf(&s, "%s%s%s", res && *res ? res : "",
+                     res && *res ? ":" : "", sub) == -1 || s == NULL ||
             (a->cache_subsidiary = strdup(sub)) == NULL) {
 	    acc_close(context, *id);
             free(s);

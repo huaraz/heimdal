@@ -37,6 +37,8 @@
 #include <assert.h>
 #include <com_err.h>
 
+static void _krb5_init_ets(krb5_context);
+
 #define INIT_FIELD(C, T, E, D, F)					\
     (C)->E = krb5_config_get_ ## T ## _default ((C), NULL, (D), 	\
 						"libdefaults", F, NULL)
@@ -243,18 +245,15 @@ init_context_from_config_file(krb5_context context)
     context->configured_default_cc_name = NULL;
 
     tmp = secure_getenv("KRB5_TRACE");
+    if (tmp)
+        heim_add_debug_dest(context->hcontext, "libkrb5", tmp);
     s = krb5_config_get_strings(context, NULL, "logging", "krb5", NULL);
-    if (tmp || s) {
+    if (s) {
 	char **p;
 
-	if (s) {
-	    for (p = s; *p; p++)
-                heim_add_debug_dest(context->hcontext, "libkrb5", *p);
-	    krb5_config_free_strings(s);
-	}
-
-	if (tmp)
+        for (p = s; *p; p++)
             heim_add_debug_dest(context->hcontext, "libkrb5", *p);
+        krb5_config_free_strings(s);
     }
 
     tmp = krb5_config_get_string(context, NULL, "libdefaults",
@@ -404,32 +403,6 @@ init_context_once(void *ctx)
     bindtextdomain(HEIMDAL_TEXTDOMAIN, HEIMDAL_LOCALEDIR);
 }
 
-static void
-clear_error_message_cb(heim_err_cb_context ctx)
-{
-    krb5_clear_error_message((krb5_context)ctx);
-}
-
-static void
-free_error_message_cb(heim_err_cb_context ctx, const char *msg)
-{
-    krb5_free_error_message((krb5_context)ctx, msg);
-}
-
-static const char *
-get_error_message_cb(heim_err_cb_context ctx, int32_t ret)
-{
-    return krb5_get_error_message((krb5_context)ctx, ret);
-}
-
-static void
-set_error_message_cb(heim_err_cb_context ctx, int32_t ret,
-                     const char *fmt, va_list args)
-{
-    krb5_vset_error_message((krb5_context)ctx, ret, fmt, args);
-}
-
-
 /**
  * Initializes the context structure and reads the configuration file
  * /etc/krb5.conf. The structure should be freed by calling
@@ -474,17 +447,10 @@ krb5_init_context(krb5_context *context)
     if(!p)
 	return ENOMEM;
 
-    HEIMDAL_MUTEX_init(&p->mutex);
     if ((p->hcontext = heim_context_init()) == NULL) {
         ret = ENOMEM;
         goto out;
     }
-
-    heim_context_set_msg_cb(p->hcontext, (void *)p,
-                            clear_error_message_cb,
-                            free_error_message_cb,
-                            get_error_message_cb,
-                            set_error_message_cb);
 
     p->flags |= KRB5_CTX_F_HOMEDIR_ACCESS;
 
@@ -500,7 +466,7 @@ krb5_init_context(krb5_context *context)
     heim_base_once_f(&init_context, p, init_context_once);
 
     /* init error tables */
-    krb5_init_ets(p);
+    _krb5_init_ets(p);
     cc_ops_register(p);
     kt_ops_register(p);
 
@@ -579,19 +545,12 @@ krb5_copy_context(krb5_context context, krb5_context *out)
     if (p == NULL)
 	return krb5_enomem(context);
 
-    HEIMDAL_MUTEX_init(&p->mutex);
-
     if ((p->hcontext = heim_context_init()) == NULL) {
         ret = ENOMEM;
         goto out;
     }
 
     heim_context_set_log_utc(p->hcontext, context->log_utc);
-    heim_context_set_msg_cb(p->hcontext, (void *)p,
-                            clear_error_message_cb,
-                            free_error_message_cb,
-                            get_error_message_cb,
-                            set_error_message_cb);
 
     if (context->default_cc_name &&
 	(p->default_cc_name = strdup(context->default_cc_name)) == NULL) {
@@ -639,7 +598,7 @@ krb5_copy_context(krb5_context context, krb5_context *out)
 	goto out;
 
     /* XXX should copy */
-    krb5_init_ets(p);
+    _krb5_init_ets(p);
 
     cc_ops_copy(p, context);
     kt_ops_copy(p, context);
@@ -692,7 +651,6 @@ krb5_free_context(krb5_context context)
     free(context->as_etypes);
     krb5_free_host_realm (context, context->default_realms);
     krb5_config_file_free (context, context->cf);
-    free_error_table (context->et_list);
     free(rk_UNCONST(context->cc_ops));
     free(context->kt_types);
     krb5_clear_error_message(context);
@@ -705,7 +663,6 @@ krb5_free_context(krb5_context context)
 	hx509_context_free(&context->hx509ctx);
 #endif
 
-    HEIMDAL_MUTEX_destroy(&context->mutex);
     if (context->flags & KRB5_CTX_F_SOCKETS_INITIALIZED) {
  	rk_SOCK_EXIT();
     }
@@ -714,11 +671,6 @@ krb5_free_context(krb5_context context)
     memset(context, 0, sizeof(*context));
     free(context);
 }
-
-#ifdef _WIN32
-#define REGPATH_KERBEROS "SOFTWARE\\Kerberos"
-#define REGPATH_HEIMDAL  "SOFTWARE\\Heimdal"
-#endif
 
 /**
  * Reinit the context from a new set of filenames.
@@ -736,26 +688,43 @@ KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_set_config_files(krb5_context context, char **filenames)
 {
     krb5_error_code ret;
+    heim_config_binding *tmp = NULL;
+
+    if ((ret = heim_set_config_files(context->hcontext, filenames,
+                                     &tmp)))
+        return ret;
+    krb5_config_file_free(context, context->cf);
+    context->cf = tmp;
+    return init_context_from_config_file(context);
+}
+
+#ifndef HEIMDAL_SMALLER
+/**
+ * Reinit the context from configuration file contents in a C string.
+ * This should only be used in tests.
+ *
+ * @param context context to add configuration too.
+ * @param config configuration.
+ *
+ * @return Returns 0 to indicate success.  Otherwise an kerberos et
+ * error code is returned, see krb5_get_error_message().
+ *
+ * @ingroup krb5
+ */
+
+KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
+krb5_set_config(krb5_context context, const char *config)
+{
+    krb5_error_code ret;
     krb5_config_binding *tmp = NULL;
-    while(filenames != NULL && *filenames != NULL && **filenames != '\0') {
-	ret = krb5_config_parse_file_multi(context, *filenames, &tmp);
-	if (ret != 0 && ret != ENOENT && ret != EACCES && ret != EPERM
-	    && ret != KRB5_CONFIG_BADFORMAT) {
-	    krb5_config_file_free(context, tmp);
-	    return ret;
-	}
-	filenames++;
-    }
+
+    if ((ret = krb5_config_parse_string_multi(context, config, &tmp)))
+        return ret;
 #if 0
     /* with this enabled and if there are no config files, Kerberos is
        considererd disabled */
-    if(tmp == NULL)
+    if (tmp == NULL)
 	return ENXIO;
-#endif
-
-#ifdef _WIN32
-    heim_load_config_from_registry(context->hcontext, REGPATH_KERBEROS,
-                                   REGPATH_HEIMDAL, &tmp);
 #endif
 
     krb5_config_file_free(context, context->cf);
@@ -763,32 +732,7 @@ krb5_set_config_files(krb5_context context, char **filenames)
     ret = init_context_from_config_file(context);
     return ret;
 }
-
-static krb5_error_code
-add_file(char ***pfilenames, int *len, char *file)
-{
-    char **pp = *pfilenames;
-    int i;
-
-    for(i = 0; i < *len; i++) {
-	if(strcmp(pp[i], file) == 0) {
-	    free(file);
-	    return 0;
-	}
-    }
-
-    pp = realloc(*pfilenames, (*len + 2) * sizeof(*pp));
-    if (pp == NULL) {
-	free(file);
-	return ENOMEM;
-    }
-
-    pp[*len] = file;
-    pp[*len + 1] = NULL;
-    *pfilenames = pp;
-    *len += 1;
-    return 0;
-}
+#endif
 
 /*
  *  `pq' isn't free, it's up the the caller
@@ -797,54 +741,7 @@ add_file(char ***pfilenames, int *len, char *file)
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_prepend_config_files(const char *filelist, char **pq, char ***ret_pp)
 {
-    krb5_error_code ret;
-    const char *p, *q;
-    char **pp;
-    int len;
-    char *fn;
-
-    pp = NULL;
-
-    len = 0;
-    p = filelist;
-    while(1) {
-	ssize_t l;
-	q = p;
-	l = strsep_copy(&q, PATH_SEP, NULL, 0);
-	if(l == -1)
-	    break;
-	fn = malloc(l + 1);
-	if(fn == NULL) {
-	    krb5_free_config_files(pp);
-	    return ENOMEM;
-	}
-	(void)strsep_copy(&p, PATH_SEP, fn, l + 1);
-	ret = add_file(&pp, &len, fn);
-	if (ret) {
-	    krb5_free_config_files(pp);
-	    return ret;
-	}
-    }
-
-    if (pq != NULL) {
-	int i;
-
-	for (i = 0; pq[i] != NULL; i++) {
-	    fn = strdup(pq[i]);
-	    if (fn == NULL) {
-		krb5_free_config_files(pp);
-		return ENOMEM;
-	    }
-	    ret = add_file(&pp, &len, fn);
-	    if (ret) {
-		krb5_free_config_files(pp);
-		return ret;
-	    }
-	}
-    }
-
-    *ret_pp = pp;
-    return 0;
+    return heim_prepend_config_files(filelist, pq, ret_pp);
 }
 
 /**
@@ -862,60 +759,9 @@ krb5_prepend_config_files(const char *filelist, char **pq, char ***ret_pp)
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_prepend_config_files_default(const char *filelist, char ***pfilenames)
 {
-    krb5_error_code ret;
-    char **defpp, **pp = NULL;
-
-    ret = krb5_get_default_config_files(&defpp);
-    if (ret)
-	return ret;
-
-    ret = krb5_prepend_config_files(filelist, defpp, &pp);
-    krb5_free_config_files(defpp);
-    if (ret) {
-	return ret;
-    }
-    *pfilenames = pp;
-    return 0;
+    return heim_prepend_config_files_default(filelist, krb5_config_file,
+                                             "KRB5_CONFIG", pfilenames);
 }
-
-#ifdef _WIN32
-
-/**
- * Checks the registry for configuration file location
- *
- * Kerberos for Windows and other legacy Kerberos applications expect
- * to find the configuration file location in the
- * SOFTWARE\MIT\Kerberos registry key under the value "config".
- */
-KRB5_LIB_FUNCTION char * KRB5_LIB_CALL
-_krb5_get_default_config_config_files_from_registry()
-{
-    static const char * KeyName = "Software\\MIT\\Kerberos";
-    char *config_file = NULL;
-    LONG rcode;
-    HKEY key;
-
-    rcode = RegOpenKeyEx(HKEY_CURRENT_USER, KeyName, 0, KEY_READ, &key);
-    if (rcode == ERROR_SUCCESS) {
-        config_file = heim_parse_reg_value_as_multi_string(NULL, key, "config",
-                                                           REG_NONE, 0, PATH_SEP);
-        RegCloseKey(key);
-    }
-
-    if (config_file)
-        return config_file;
-
-    rcode = RegOpenKeyEx(HKEY_LOCAL_MACHINE, KeyName, 0, KEY_READ, &key);
-    if (rcode == ERROR_SUCCESS) {
-        config_file = heim_parse_reg_value_as_multi_string(NULL, key, "config",
-                                                           REG_NONE, 0, PATH_SEP);
-        RegCloseKey(key);
-    }
-
-    return config_file;
-}
-
-#endif
 
 /**
  * Get the global configuration list.
@@ -931,31 +777,10 @@ _krb5_get_default_config_config_files_from_registry()
 KRB5_LIB_FUNCTION krb5_error_code KRB5_LIB_CALL
 krb5_get_default_config_files(char ***pfilenames)
 {
-    const char *files = NULL;
-
     if (pfilenames == NULL)
         return EINVAL;
-    files = secure_getenv("KRB5_CONFIG");
-
-#ifdef _WIN32
-    if (files == NULL) {
-        char * reg_files;
-        reg_files = _krb5_get_default_config_config_files_from_registry();
-        if (reg_files != NULL) {
-            krb5_error_code code;
-
-            code = krb5_prepend_config_files(reg_files, NULL, pfilenames);
-            free(reg_files);
-
-            return code;
-        }
-    }
-#endif
-
-    if (files == NULL)
-	files = krb5_config_file;
-
-    return krb5_prepend_config_files(files, NULL, pfilenames);
+    return heim_get_default_config_files(krb5_config_file, "KRB5_CONFIG",
+                                         pfilenames);
 }
 
 /**
@@ -973,10 +798,7 @@ krb5_get_default_config_files(char ***pfilenames)
 KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_free_config_files(char **filenames)
 {
-    char **p;
-    for(p = filenames; p && *p != NULL; p++)
-	free(*p);
-    free(filenames);
+    heim_free_config_files(filenames);
 }
 
 /**
@@ -1177,28 +999,31 @@ krb5_get_default_in_tkt_etypes(krb5_context context,
 KRB5_LIB_FUNCTION void KRB5_LIB_CALL
 krb5_init_ets(krb5_context context)
 {
-    if(context->et_list == NULL){
-	krb5_add_et_list(context, initialize_krb5_error_table_r);
-	krb5_add_et_list(context, initialize_asn1_error_table_r);
-	krb5_add_et_list(context, initialize_heim_error_table_r);
+}
 
-	krb5_add_et_list(context, initialize_k524_error_table_r);
-	krb5_add_et_list(context, initialize_k5e1_error_table_r);
+static void
+_krb5_init_ets(krb5_context context)
+{
+    heim_add_et_list(context->hcontext, initialize_krb5_error_table_r);
+    heim_add_et_list(context->hcontext, initialize_asn1_error_table_r);
+    heim_add_et_list(context->hcontext, initialize_heim_error_table_r);
+
+    heim_add_et_list(context->hcontext, initialize_k524_error_table_r);
+    heim_add_et_list(context->hcontext, initialize_k5e1_error_table_r);
 
 #ifdef COM_ERR_BINDDOMAIN_krb5
-	bindtextdomain(COM_ERR_BINDDOMAIN_krb5, HEIMDAL_LOCALEDIR);
-	bindtextdomain(COM_ERR_BINDDOMAIN_asn1, HEIMDAL_LOCALEDIR);
-	bindtextdomain(COM_ERR_BINDDOMAIN_heim, HEIMDAL_LOCALEDIR);
-	bindtextdomain(COM_ERR_BINDDOMAIN_k524, HEIMDAL_LOCALEDIR);
+    bindtextdomain(COM_ERR_BINDDOMAIN_krb5, HEIMDAL_LOCALEDIR);
+    bindtextdomain(COM_ERR_BINDDOMAIN_asn1, HEIMDAL_LOCALEDIR);
+    bindtextdomain(COM_ERR_BINDDOMAIN_heim, HEIMDAL_LOCALEDIR);
+    bindtextdomain(COM_ERR_BINDDOMAIN_k524, HEIMDAL_LOCALEDIR);
 #endif
 
 #ifdef PKINIT
-	krb5_add_et_list(context, initialize_hx_error_table_r);
+    heim_add_et_list(context->hcontext, initialize_hx_error_table_r);
 #ifdef COM_ERR_BINDDOMAIN_hx
-	bindtextdomain(COM_ERR_BINDDOMAIN_hx, HEIMDAL_LOCALEDIR);
+    bindtextdomain(COM_ERR_BINDDOMAIN_hx, HEIMDAL_LOCALEDIR);
 #endif
 #endif
-    }
 }
 
 /**

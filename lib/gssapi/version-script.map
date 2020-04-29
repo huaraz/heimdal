@@ -37,6 +37,7 @@ HEIMDAL_GSS_2.0 {
 		gss_display_status;
 		gss_duplicate_name;
 		gss_duplicate_oid;
+		gss_duplicate_oid_set;
 		gss_encapsulate_token;
 		gss_export_cred;
 		gss_export_name;
@@ -76,7 +77,6 @@ HEIMDAL_GSS_2.0 {
 		gss_release_buffer;
 		gss_release_buffer_set;
 		gss_release_cred;
-		gss_release_cred_by_mech;
 		gss_release_iov_buffer;
 		gss_release_name;
 		gss_release_oid;
@@ -171,7 +171,7 @@ HEIMDAL_GSS_2.0 {
 		__gss_krb5_mechanism_oid_desc;
 		__gss_ntlm_mechanism_oid_desc;
 		__gss_spnego_mechanism_oid_desc;
-		__gss_c_peer_has_updated_spnego_oid_desc;
+		__gss_sanon_x25519_mechanism_oid_desc;
 		__gss_c_ma_mech_concrete_oid_desc;
 		__gss_c_ma_mech_pseudo_oid_desc;
 		__gss_c_ma_mech_composite_oid_desc;

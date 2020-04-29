@@ -38,6 +38,7 @@ intcflags=-I$(SRCDIR) -I$(OBJ)
 INCFILES=				\
 	$(INCDIR)\heimbase.h		\
 	$(INCDIR)\heimbase-protos.h	\
+	$(INCDIR)\heimbase-svc.h	\
 	$(INCDIR)\heim_err.h		\
 	$(INCDIR)\common_plugin.h
 
@@ -55,6 +56,7 @@ libheimbase_SOURCES =		\
 	dict.c			\
 	dll.c			\
 	error.c			\
+	error_string.c		\
 	expand_path.c		\
 	heimbase.c		\
 	json.c			\
@@ -77,6 +79,7 @@ libheimbase_OBJS =		\
 	$(OBJ)\dict.obj		\
 	$(OBJ)\dll.obj		\
 	$(OBJ)\error.obj	\
+	$(OBJ)\error_string.obj	\
 	$(OBJ)\expand_path.obj	\
 	$(OBJ)\heimbase.obj	\
 	$(OBJ)\json.obj		\
@@ -90,7 +93,7 @@ libheimbase_OBJS =		\
 libheimbase_gen_OBJS= $(OBJ)\heim_err.obj
 
 $(LIBHEIMBASE): $(libheimbase_OBJS) $(libheimbase_gen_OBJS)
-	$(LIBCON_C) -OUT:$@ $(LIBROKEN) $(PTHREAD_LIB) Secur32.lib Shell32.lib Advapi32.lib @<<
+	$(LIBCON_C) -OUT:$@ $(LIBROKEN) $(LIBCOMERR) $(PTHREAD_LIB) Secur32.lib Shell32.lib Advapi32.lib Shlwapi.lib @<<
 $(libheimbase_OBJS: =
 )
 $(libheimbase_gen_OBJS: =

@@ -12,6 +12,7 @@ AM_CPPFLAGS += \
 	-I$(srcdir)/ntlm \
 	-I$(srcdir)/krb5 \
 	-I$(srcdir)/spnego \
+	-I$(srcdir)/sanon \
 	$(INCLUDE_libintl)
 
 lib_LTLIBRARIES = libgssapi.la test_negoex_mech.la
@@ -106,6 +107,7 @@ mechsrc = \
 	mech/gss_duplicate_cred.c \
 	mech/gss_duplicate_name.c \
 	mech/gss_duplicate_oid.c \
+	mech/gss_duplicate_oid_set.c \
 	mech/gss_encapsulate_token.c \
 	mech/gss_export_name.c \
 	mech/gss_export_name_composite.c \
@@ -139,6 +141,7 @@ mechsrc = \
 	mech/gss_release_name.c \
 	mech/gss_release_oid.c \
 	mech/gss_release_oid_set.c \
+	mech/gss_rfc4121.c \
 	mech/gss_seal.c \
 	mech/gss_set_cred_option.c \
 	mech/gss_set_name_attribute.c \
@@ -169,7 +172,6 @@ spnegosrc = \
 	spnego/accept_sec_context.c \
 	spnego/compat.c \
 	spnego/context_stubs.c \
-	spnego/cred_stubs.c \
 	spnego/external.c \
 	spnego/init_sec_context.c \
 	spnego/negoex_ctx.c \
@@ -214,11 +216,45 @@ ntlmsrc = \
 $(srcdir)/ntlm/ntlm-private.h: $(ntlmsrc)
 	cd $(srcdir) && perl ../../cf/make-proto.pl -q -P comment -p ntlm/ntlm-private.h $(ntlmsrc) || rm -f ntlm/ntlm-private.h
 
+sanonsrc = \
+	sanon/accept_sec_context.c \
+	sanon/acquire_cred.c \
+	sanon/add_cred.c \
+	sanon/canonicalize_name.c \
+	sanon/compare_name.c \
+	sanon/context_time.c \
+	sanon/crypto.c \
+	sanon/delete_sec_context.c \
+	sanon/display_name.c \
+	sanon/display_status.c \
+	sanon/duplicate_cred.c \
+	sanon/duplicate_name.c \
+	sanon/export_name.c \
+	sanon/export_cred.c \
+	sanon/export_sec_context.c \
+	sanon/external.c \
+	sanon/import_cred.c \
+	sanon/import_name.c \
+	sanon/import_sec_context.c \
+	sanon/init_sec_context.c \
+	sanon/inquire_context.c \
+	sanon/inquire_cred.c \
+	sanon/inquire_cred_by_mech.c \
+	sanon/inquire_mechs_for_name.c \
+	sanon/inquire_names_for_mech.c \
+	sanon/inquire_sec_context_by_oid.c \
+	sanon/negoex.c \
+	sanon/process_context_token.c \
+	sanon/release_cred.c \
+	sanon/release_name.c \
+	sanon/sanon-private.h
+
 dist_libgssapi_la_SOURCES  = \
 	$(krb5src) \
 	$(mechsrc) \
 	$(ntlmsrc) \
-	$(spnegosrc)
+	$(spnegosrc) \
+	$(sanonsrc)
 
 nodist_libgssapi_la_SOURCES  = \
 	gkrb5_err.c \
@@ -251,6 +287,7 @@ noinst_HEADERS = \
 	gssapi_mech.h \
 	$(srcdir)/ntlm/ntlm-private.h \
 	$(srcdir)/spnego/spnego-private.h \
+	$(srcdir)/sanon/sanon-private.h \
 	$(srcdir)/krb5/gsskrb5-private.h
 
 nobase_include_HEADERS = \
@@ -280,6 +317,7 @@ spnego_files =					\
 BUILTHEADERS = \
 	$(srcdir)/krb5/gsskrb5-private.h \
 	$(srcdir)/spnego/spnego-private.h \
+	$(srcdir)/sanon/sanon-private.h \
 	$(srcdir)/ntlm/ntlm-private.h
 
 $(libgssapi_la_OBJECTS): $(BUILTHEADERS)
@@ -314,6 +352,8 @@ $(srcdir)/krb5/gsskrb5-private.h:
 $(srcdir)/spnego/spnego-private.h:
 	cd $(srcdir) && perl ../../cf/make-proto.pl -q -P comment -p spnego/spnego-private.h $(spnegosrc) || rm -f spnego/spnego-private.h
 
+$(srcdir)/sanon/sanon-private.h:
+	cd $(srcdir) && perl ../../cf/make-proto.pl -q -P comment -p sanon/sanon-private.h $(sanonsrc) || rm -f sanon/sanon-private.h
 
 TESTS = test_oid test_names test_cfx
 # test_sequence 

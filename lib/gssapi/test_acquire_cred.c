@@ -189,8 +189,8 @@ static struct getargs args[] = {
     {"acquire-name", 0,	arg_string,	&acquire_name, "name", NULL },
     {"acquire-type", 0,	arg_string,	&acquire_type, "type", NULL },
     {"enctype", 0,	arg_integer,	&enctype, "enctype-num", NULL },
-    {"loops", 0,	arg_integer,	&num_loops, "enctype-num", NULL },
-    {"kerberos", 0,	arg_flag,	&kerberos_flag, "enctype-num", NULL },
+    {"loops", 0,	arg_integer,	&num_loops, "num-loops", NULL },
+    {"kerberos", 0,	arg_flag,	&kerberos_flag, NULL, NULL },
     {"target-name", 0,	arg_string,	&target_name, "name", NULL },
     {"ccache", 0,	arg_string,	&ccache, "name", NULL },
     {"client-keytab", 0,arg_string,	&client_keytab, "name", NULL },
@@ -337,7 +337,8 @@ main(int argc, char **argv)
 	}
 	gss_release_cred(&min_stat, &cred);
     }
-
+    gss_release_oid_set(&min_stat, &oidset);
+    gss_release_name(&min_stat, &target);
 
     return 0;
 }

@@ -42,7 +42,11 @@ release_mech_cred(OM_uint32 *minor, struct _gss_mechanism_cred *mc)
 {
 	OM_uint32 major;
 
-	major = mc->gmc_mech->gm_release_cred(minor, &mc->gmc_cred);
+        if (mc->gmc_mech->gm_release_cred != NULL)
+		major = mc->gmc_mech->gm_release_cred(minor, &mc->gmc_cred);
+	else
+		major = GSS_S_COMPLETE;
+
 	free(mc);
 
 	return major;
@@ -59,6 +63,7 @@ _gss_mg_release_cred(struct _gss_cred *cred)
 		HEIM_TAILQ_REMOVE(&cred->gc_mc, mc, gmc_link);
 		release_mech_cred(&junk, mc);
 	}
+        gss_release_oid_set(&junk, &cred->gc_neg_mechs);
 	free(cred);
 }
 
@@ -74,24 +79,3 @@ _gss_mg_alloc_cred(void)
 	return cred;
 }
 
-GSSAPI_LIB_FUNCTION OM_uint32 GSSAPI_LIB_CALL
-gss_release_cred_by_mech(OM_uint32 *minor_status,
-			 gss_cred_id_t cred_handle,
-			 gss_const_OID mech_oid)
-{
-	struct _gss_cred *cred = (struct _gss_cred *)cred_handle;
-	struct _gss_mechanism_cred *mc, *next;
-	OM_uint32 major_status = GSS_S_NO_CRED;
-
-	*minor_status = 0;
-
-	HEIM_TAILQ_FOREACH_SAFE(mc, &cred->gc_mc, gmc_link, next) {
-		if (gss_oid_equal(mech_oid, mc->gmc_mech_oid)) {
-			HEIM_TAILQ_REMOVE(&cred->gc_mc, mc, gmc_link);
-			major_status = release_mech_cred(minor_status, mc);
-			break;
-		}
-	}
-
-	return major_status;
-}

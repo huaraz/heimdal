@@ -195,6 +195,7 @@ tags
 /lib/gssapi/gsstool
 /lib/gssapi/krb5/gsskrb5-private.h
 /lib/gssapi/ntlm/ntlm-private.h
+/lib/gssapi/sanon/sanon-private.h
 /lib/gssapi/spnego/spnego-private.h
 /lib/gssapi/test_acquire_cred
 /lib/gssapi/test_add_store_cred
@@ -235,6 +236,7 @@ tags
 /lib/hcrypto/test_rand
 /lib/hcrypto/test_rsa
 /lib/hcrypto/unix
+/lib/hcrypto/libtommath/callgraph.txt
 /lib/hdb/hdb-protos.h
 /lib/hdb/hdb-private.h
 /lib/hdb/test_dbinfo

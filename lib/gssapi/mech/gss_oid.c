@@ -94,6 +94,9 @@ gss_OID_desc GSSAPI_LIB_VARIABLE __gss_krb5_cred_no_ci_flags_x_oid_desc = { 6, r
 /* GSS_KRB5_IMPORT_CRED_X - 1.2.752.43.13.30 */
 gss_OID_desc GSSAPI_LIB_VARIABLE __gss_krb5_import_cred_x_oid_desc = { 6, rk_UNCONST("\x2a\x85\x70\x2b\x0d\x1e") };
 
+/* GSS_KRB5_IMPORT_RFC4121_CONTEXT_X - 1.2.752.43.13.31 */
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_krb5_import_rfc4121_context_x_oid_desc = { 6, rk_UNCONST("\x2a\x85\x70\x2b\x0d\x1f") };
+
 /* GSS_C_MA_SASL_MECH_NAME - 1.2.752.43.13.100 */
 gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ma_sasl_mech_name_oid_desc = { 6, rk_UNCONST("\x2a\x85\x70\x2b\x0d\x64") };
 
@@ -142,14 +145,17 @@ gss_OID_desc GSSAPI_LIB_VARIABLE __gss_ntlm_mechanism_oid_desc = { 10, rk_UNCONS
 /* GSS_SPNEGO_MECHANISM - 1.3.6.1.5.5.2 */
 gss_OID_desc GSSAPI_LIB_VARIABLE __gss_spnego_mechanism_oid_desc = { 6, rk_UNCONST("\x2b\x06\x01\x05\x05\x02") };
 
-/* GSS_C_PEER_HAS_UPDATED_SPNEGO - 1.3.6.1.4.1.5322.19.5 */
-gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_peer_has_updated_spnego_oid_desc = { 9, rk_UNCONST("\x2b\x06\x01\x04\x01\xa9\x4a\x13\x05") };
+/* GSS_C_INQ_PEER_HAS_BUGGY_SPNEGO - 1.3.6.1.4.1.5322.19.6 */
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_inq_peer_has_buggy_spnego_oid_desc = { 9, rk_UNCONST("\x2b\x06\x01\x04\x01\xa9\x4a\x13\x06") };
 
 /* GSS_C_NTLM_RESET_CRYPTO - 1.3.6.1.4.1.7165.655.1.3 */
 gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ntlm_reset_crypto_oid_desc = { 11, rk_UNCONST("\x2b\x06\x01\x04\x01\xb7\x7d\x85\x0f\x01\x03") };
 
 /* GSS_NEGOEX_MECHANISM - 1.3.6.1.4.1.311.2.2.30 */
 gss_OID_desc GSSAPI_LIB_VARIABLE __gss_negoex_mechanism_oid_desc = { 10, rk_UNCONST("\x2b\x06\x01\x04\x01\x82\x37\x02\x02\x1e") };
+
+/* GSS_SANON_X25519_MECHANISM - 1.3.6.1.4.1.5322.26.1.110 */
+gss_OID_desc GSSAPI_LIB_VARIABLE __gss_sanon_x25519_mechanism_oid_desc = { 10, rk_UNCONST("\x2b\x06\x01\x04\x01\xa9\x4a\x1a\x01\x6e") };
 
 /* GSS_C_MA_MECH_CONCRETE - 1.3.6.1.5.5.13.1 */
 gss_OID_desc GSSAPI_LIB_VARIABLE __gss_c_ma_mech_concrete_oid_desc = { 7, rk_UNCONST("\x2b\x06\x01\x05\x05\x0d\x01") };
@@ -273,6 +279,7 @@ struct _gss_oid_name_table _gss_ont_ma[] = {
 struct _gss_oid_name_table _gss_ont_mech[] = {
   { GSS_KRB5_MECHANISM, "GSS_KRB5_MECHANISM", "Kerberos 5", "Heimdal Kerberos 5 mechanism" },
   { GSS_NTLM_MECHANISM, "GSS_NTLM_MECHANISM", "NTLM", "Heimdal NTLM mechanism" },
+  { GSS_SANON_X25519_MECHANISM, "GSS_SANON_X25519_MECHANISM", "SAnon-X25519", "Heimdal Simple Anonymous (X25519) mechanism" },
   { GSS_SPNEGO_MECHANISM, "GSS_SPNEGO_MECHANISM", "SPNEGO", "Heimdal SPNEGO mechanism" },
   { NULL, NULL, NULL, NULL }
 };
@@ -309,6 +316,7 @@ gss_OID _gss_ot_internal[] = {
   &__gss_c_ntlm_force_v1_oid_desc,
   &__gss_krb5_cred_no_ci_flags_x_oid_desc,
   &__gss_krb5_import_cred_x_oid_desc,
+  &__gss_krb5_import_rfc4121_context_x_oid_desc,
   &__gss_c_ma_sasl_mech_name_oid_desc,
   &__gss_c_ma_mech_name_oid_desc,
   &__gss_c_ma_mech_description_oid_desc,
@@ -325,9 +333,10 @@ gss_OID _gss_ot_internal[] = {
   &__gss_krb5_mechanism_oid_desc,
   &__gss_ntlm_mechanism_oid_desc,
   &__gss_spnego_mechanism_oid_desc,
-  &__gss_c_peer_has_updated_spnego_oid_desc,
+  &__gss_c_inq_peer_has_buggy_spnego_oid_desc,
   &__gss_c_ntlm_reset_crypto_oid_desc,
   &__gss_negoex_mechanism_oid_desc,
+  &__gss_sanon_x25519_mechanism_oid_desc,
   &__gss_c_ma_mech_concrete_oid_desc,
   &__gss_c_ma_mech_pseudo_oid_desc,
   &__gss_c_ma_mech_composite_oid_desc,

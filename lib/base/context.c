@@ -36,21 +36,6 @@
 #undef __attribute__
 #define __attribute__(X)
 
-struct heim_context_s {
-    heim_log_facility       *warn_dest; /* XXX Move warn.c into lib/base as well */
-    heim_log_facility       *debug_dest;
-    char                    *time_fmt;
-    unsigned int            log_utc:1;
-    unsigned int            homedir_access:1;
-    heim_err_cb_context     error_context;
-    heim_err_cb_clear_msg    clear_error_message;
-    heim_err_cb_free_msg    free_error_message;
-    heim_err_cb_get_msg     get_error_message;
-    heim_err_cb_set_msg     set_error_message;
-    const char              *unknown_error;
-    const char              *success;
-};
-
 heim_context
 heim_context_init(void)
 {
@@ -60,16 +45,12 @@ heim_context_init(void)
         return NULL;
 
     context->log_utc = 1;
-    context->clear_error_message = NULL;
-    context->free_error_message = NULL;
-    context->get_error_message = NULL;
-    context->set_error_message = NULL;
-    context->error_context = NULL;
-    context->unknown_error = "Unknown error";
-    context->success = "Success";
+    context->error_string = NULL;
     context->debug_dest = NULL;
     context->warn_dest = NULL;
+    context->log_dest = NULL;
     context->time_fmt = NULL;
+    context->et_list = NULL;
     return context;
 }
 
@@ -83,23 +64,18 @@ heim_context_free(heim_context *contextp)
         return;
     heim_closelog(context, context->debug_dest);
     heim_closelog(context, context->warn_dest);
+    heim_closelog(context, context->log_dest);
+    free_error_table(context->et_list);
     free(context->time_fmt);
+    free(context->error_string);
     free(context);
 }
 
-void
-heim_context_set_msg_cb(heim_context context,
-                        heim_err_cb_context cb_context,
-                        heim_err_cb_clear_msg cb_clear_msg,
-                        heim_err_cb_free_msg cb_free_msg,
-                        heim_err_cb_get_msg cb_get_msg,
-                        heim_err_cb_set_msg cb_set_msg)
+heim_error_code
+heim_add_et_list(heim_context context, void (*func)(struct et_list **))
 {
-    context->error_context = cb_context;
-    context->clear_error_message = cb_clear_msg;
-    context->free_error_message = cb_free_msg;
-    context->set_error_message = cb_set_msg;
-    context->get_error_message = cb_get_msg;
+    (*func)(&context->et_list);
+    return 0;
 }
 
 heim_error_code
@@ -154,57 +130,17 @@ heim_context_get_homedir_access(heim_context context)
     return context->homedir_access;
 }
 
-void
-heim_clear_error_message(heim_context context)
-{
-    if (context != NULL && context->clear_error_message != NULL)
-        context->clear_error_message(context->error_context);
-}
-
-void
-heim_free_error_message(heim_context context, const char *msg)
-{
-    if (context != NULL && context->free_error_message != NULL &&
-        msg != context->unknown_error && msg != context->success)
-        context->free_error_message(context->error_context, msg);
-}
-
-const char *
-heim_get_error_message(heim_context context, heim_error_code ret)
-{
-    if (context != NULL && context->get_error_message != NULL)
-        return context->get_error_message(context->error_context, ret);
-    if (ret)
-        return context->unknown_error;
-    return context->success;
-}
-
-void
-heim_set_error_message(heim_context context, heim_error_code ret,
-		       const char *fmt, ...)
-    __attribute__ ((__format__ (__printf__, 3, 4)))
-{
-    va_list ap;
-
-    va_start(ap, fmt);
-    heim_vset_error_message(context, ret, fmt, ap);
-    va_end(ap);
-}
-
-void
-heim_vset_error_message(heim_context context, heim_error_code ret,
-                        const char *fmt, va_list args)
-    __attribute__ ((__format__ (__printf__, 3, 0)))
-{
-    if (context != NULL && context->set_error_message != NULL)
-        context->set_error_message(context->error_context, ret, fmt, args);
-}
-
 heim_error_code
 heim_enomem(heim_context context)
 {
     heim_set_error_message(context, ENOMEM, "malloc: out of memory");
     return ENOMEM;
+}
+
+heim_log_facility *
+heim_get_log_dest(heim_context context)
+{
+    return context->log_dest;
 }
 
 heim_log_facility *
@@ -220,6 +156,13 @@ heim_get_debug_dest(heim_context context)
 }
 
 heim_error_code
+heim_set_log_dest(heim_context context, heim_log_facility *fac)
+{
+    context->log_dest = fac;
+    return 0;
+}
+
+heim_error_code
 heim_set_warn_dest(heim_context context, heim_log_facility *fac)
 {
     context->warn_dest = fac;
@@ -231,4 +174,212 @@ heim_set_debug_dest(heim_context context, heim_log_facility *fac)
 {
     context->debug_dest = fac;
     return 0;
+}
+
+#define PATH_SEP ":"
+
+static heim_error_code
+add_file(char ***pfilenames, int *len, char *file)
+{
+    char **pp = *pfilenames;
+    int i;
+
+    for(i = 0; i < *len; i++) {
+        if(strcmp(pp[i], file) == 0) {
+            free(file);
+            return 0;
+        }
+    }
+
+    pp = realloc(*pfilenames, (*len + 2) * sizeof(*pp));
+    if (pp == NULL) {
+        free(file);
+        return ENOMEM;
+    }
+
+    pp[*len] = file;
+    pp[*len + 1] = NULL;
+    *pfilenames = pp;
+    *len += 1;
+    return 0;
+}
+
+#ifdef WIN32
+static char *
+get_default_config_config_files_from_registry(void)
+{
+    static const char *KeyName = "Software\\Heimdal"; /* XXX #define this */
+    char *config_file = NULL;
+    LONG rcode;
+    HKEY key;
+
+    rcode = RegOpenKeyEx(HKEY_CURRENT_USER, KeyName, 0, KEY_READ, &key);
+    if (rcode == ERROR_SUCCESS) {
+        config_file = heim_parse_reg_value_as_multi_string(NULL, key, "config",
+                                                           REG_NONE, 0, PATH_SEP);
+        RegCloseKey(key);
+    }
+
+    if (config_file)
+        return config_file;
+
+    rcode = RegOpenKeyEx(HKEY_LOCAL_MACHINE, KeyName, 0, KEY_READ, &key);
+    if (rcode == ERROR_SUCCESS) {
+        config_file = heim_parse_reg_value_as_multi_string(NULL, key, "config",
+                                                           REG_NONE, 0, PATH_SEP);
+        RegCloseKey(key);
+    }
+
+    return config_file;
+}
+#endif
+
+heim_error_code
+heim_prepend_config_files(const char *filelist,
+                          char **pq,
+                          char ***ret_pp)
+{
+    heim_error_code ret;
+    const char *p, *q;
+    char **pp;
+    int len;
+    char *fn;
+
+    pp = NULL;
+
+    len = 0;
+    p = filelist;
+    while(1) {
+        ssize_t l;
+        q = p;
+        l = strsep_copy(&q, PATH_SEP, NULL, 0);
+        if(l == -1)
+            break;
+        fn = malloc(l + 1);
+        if(fn == NULL) {
+            heim_free_config_files(pp);
+            return ENOMEM;
+        }
+        (void) strsep_copy(&p, PATH_SEP, fn, l + 1);
+        ret = add_file(&pp, &len, fn);
+        if (ret) {
+            heim_free_config_files(pp);
+            return ret;
+        }
+    }
+
+    if (pq != NULL) {
+        int i;
+
+        for (i = 0; pq[i] != NULL; i++) {
+            fn = strdup(pq[i]);
+            if (fn == NULL) {
+                heim_free_config_files(pp);
+                return ENOMEM;
+            }
+            ret = add_file(&pp, &len, fn);
+            if (ret) {
+                heim_free_config_files(pp);
+                return ret;
+            }
+        }
+    }
+
+    *ret_pp = pp;
+    return 0;
+}
+
+heim_error_code
+heim_prepend_config_files_default(const char *prepend,
+                                  const char *def,
+                                  const char *envvar,
+                                  char ***pfilenames)
+{
+    heim_error_code ret;
+    char **defpp, **pp = NULL;
+
+    ret = heim_get_default_config_files(def, envvar, &defpp);
+    if (ret)
+        return ret;
+
+    ret = heim_prepend_config_files(prepend, defpp, &pp);
+    heim_free_config_files(defpp);
+    if (ret) {
+        return ret;
+    }
+    *pfilenames = pp;
+    return 0;
+}
+
+heim_error_code
+heim_get_default_config_files(const char *def,
+                              const char *envvar,
+                              char ***pfilenames)
+{
+    const char *files = NULL;
+
+    files = secure_getenv(envvar);
+
+#ifdef _WIN32
+    if (files == NULL) {
+        char * reg_files;
+        reg_files = get_default_config_config_files_from_registry();
+        if (reg_files != NULL) {
+            heim_error_code code;
+
+            code = heim_prepend_config_files(reg_files, NULL, pfilenames);
+            free(reg_files);
+
+            return code;
+        }
+    }
+#endif
+
+    if (files == NULL)
+        files = def;
+    return heim_prepend_config_files(files, NULL, pfilenames);
+}
+
+#ifdef _WIN32
+#define REGPATH_KERBEROS "SOFTWARE\\Kerberos"
+#define REGPATH_HEIMDAL  "SOFTWARE\\Heimdal"
+#endif
+
+heim_error_code
+heim_set_config_files(heim_context context, char **filenames,
+                      heim_config_binding **res)
+{
+    heim_error_code ret = 0;
+
+    *res = NULL;
+    while (filenames != NULL && *filenames != NULL && **filenames != '\0') {
+        ret = heim_config_parse_file_multi(context, *filenames, res);
+        if (ret != 0 && ret != ENOENT && ret != EACCES && ret != EPERM
+            && ret != HEIM_ERR_CONFIG_BADFORMAT) {
+            heim_config_file_free(context, *res);
+            *res = NULL;
+            return ret;
+        }
+        filenames++;
+    }
+
+#ifdef _WIN32
+    /*
+     * We always ignored errors from loading from the registry, so we still do.
+     */
+    heim_load_config_from_registry(context, REGPATH_KERBEROS,
+                                   REGPATH_HEIMDAL, res);
+
+#endif
+    return 0;
+}
+
+void
+heim_free_config_files(char **filenames)
+{
+    char **p;
+
+    for (p = filenames; p && *p != NULL; p++)
+        free(*p);
+    free(filenames);
 }

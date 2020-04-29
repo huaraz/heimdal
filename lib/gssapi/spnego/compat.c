@@ -152,38 +152,30 @@ OM_uint32 GSSAPI_CALLCONV _gss_spnego_internal_delete_sec_context
     return ret;
 }
 
-/*
- * Returns TRUE if the mechanism believes that a mechListMIC is required.
- * This is an internal interface for NTLM which requires a mechListMIC if
- * an internal MIC in the NTLM protocol was used. Note that only the Samba
- * NTLM mechanism supports this, it is not yet implemented in Heimdal's.
- */
-
 static int
-mech_require_mechlist_mic_p(gssspnego_ctx ctx)
+inq_context_by_oid_bool(gssspnego_ctx ctx, gss_OID oid)
 {
     OM_uint32 major, minor;
     gss_buffer_set_t data_set = GSS_C_NO_BUFFER_SET;
-    uint8_t mech_require_mic = 0;
+    uint8_t ret = 0;
 
     major = gss_inquire_sec_context_by_oid(&minor, ctx->negotiated_ctx_id,
-					   GSS_C_INQ_REQUIRE_MECHLIST_MIC, &data_set);
+					   oid, &data_set);
     if (major != GSS_S_COMPLETE)
 	return FALSE;
 
     if (data_set != GSS_C_NO_BUFFER_SET &&
 	data_set->count == 1 &&
 	data_set->elements[0].length == 1)
-	mech_require_mic = *((uint8_t *)data_set->elements[0].value);
+	ret = *((uint8_t *)data_set->elements[0].value);
 
     gss_release_buffer_set(&minor, &data_set);
 
-    return mech_require_mic == 1;
+    return ret != 0;
 }
 
 /*
- * Returns TRUE if it is safe to omit mechListMIC because the preferred
- * mechanism was selected, and the peer did not require it.
+ * Returns TRUE if it is safe to omit mechListMIC.
  */
 
 int
@@ -193,11 +185,16 @@ _gss_spnego_safe_omit_mechlist_mic(gssspnego_ctx ctx)
 
     if (ctx->flags.peer_require_mic) {
 	_gss_mg_log(10, "spnego: mechListMIC required by peer");
-    } else if (mech_require_mechlist_mic_p(ctx)) {
+    } else if (inq_context_by_oid_bool(ctx, GSS_C_INQ_PEER_HAS_BUGGY_SPNEGO)) {
+	/* [MS-SPNG] Appendix A <7> Section 3.1.5.1: may be old peer with buggy SPNEGO */
+	safe_omit = TRUE;
+	_gss_mg_log(10, "spnego: mechListMIC omitted for legacy interoperability");
+    } else if (inq_context_by_oid_bool(ctx, GSS_C_INQ_REQUIRE_MECHLIST_MIC)) {
+	/*  [MS-SPNG] Appendix A <7> Section 3.1.5.1: allow NTLM to force MIC */
 	_gss_mg_log(10, "spnego: mechListMIC required by mechanism");
     } else if (gss_oid_equal(ctx->selected_mech_type, ctx->preferred_mech_type)) {
 	safe_omit = TRUE;
-	_gss_mg_log(10, "spnego: mechListMIC may be omitted as preferred mechanism selected");
+	_gss_mg_log(10, "spnego: mechListMIC omitted as preferred mechanism selected");
     } else {
 	_gss_mg_log(10, "spnego: mechListMIC required by default");
     }
@@ -205,6 +202,95 @@ _gss_spnego_safe_omit_mechlist_mic(gssspnego_ctx ctx)
     return safe_omit;
 }
 
+/*
+ * A map between a GSS-API flag and a (mechanism attribute, weight)
+ * tuple. The list of mechanisms is re-ordered by aggregate weight
+ * (highest weight is more preferred, e.g. if GSS_C_MUTUAL_FLAG and
+ * GSS_C_ANON_FLAG are set, we prefer a mechanism that supports
+ * mutual authentication over one that only supports anonymous).
+ */
+static struct {
+    OM_uint32 flag;
+    gss_OID ma;
+    int weight;
+} flag_to_ma_map[] = {
+    { GSS_C_MUTUAL_FLAG, GSS_C_MA_AUTH_TARG, 2 },
+    { GSS_C_ANON_FLAG, GSS_C_MA_AUTH_INIT_ANON, 1 },
+};
+
+/*
+ * Returns a bitmask indicating GSS flags we can sort on.
+ */
+static inline OM_uint32
+mech_flag_mask(void)
+{
+    size_t i;
+    OM_uint32 mask = 0;
+
+    for (i = 0; i < sizeof(flag_to_ma_map)/sizeof(flag_to_ma_map[0]); i++)
+	mask |= flag_to_ma_map[i].flag;
+
+    return mask;
+}
+
+/*
+ * Returns an integer representing the preference weighting for a
+ * mechanism, based on the requested GSS flags.
+ */
+static int
+mech_weight(gss_const_OID mech, OM_uint32 req_flags)
+{
+    OM_uint32 major, minor;
+    gss_OID_set mech_attrs = GSS_C_NO_OID_SET;
+    int weight = 0;
+    size_t i, j;
+
+    major = gss_inquire_attrs_for_mech(&minor, mech, &mech_attrs, NULL);
+    if (GSS_ERROR(major))
+	return 0;
+
+    for (i = 0; i < sizeof(flag_to_ma_map)/sizeof(flag_to_ma_map[0]); i++) {
+	if ((req_flags & flag_to_ma_map[i].flag) == 0)
+	    continue;
+
+	for (j = 0; j < mech_attrs->count; j++) {
+	    if (gss_oid_equal(flag_to_ma_map[i].ma, &mech_attrs->elements[j])) {
+		weight += flag_to_ma_map[i].weight;
+		continue;
+	    }
+	}
+    }
+
+    gss_release_oid_set(&minor, &mech_attrs);
+
+    return weight;
+}
+
+static int
+mech_compare(const void *mech1, const void *mech2, void *req_flags_p)
+{
+    OM_uint32 req_flags = *((OM_uint32 *)req_flags_p);
+    int mech1_weight = mech_weight(mech1, req_flags);
+    int mech2_weight = mech_weight(mech2, req_flags);
+
+    return mech2_weight - mech1_weight;
+}
+
+/*
+ * Order a list of mechanisms by weight based on requested GSS flags.
+ */
+static void
+order_mechs_by_flags(gss_OID_set mechs, OM_uint32 req_flags)
+{
+    if (req_flags & mech_flag_mask()) { /* skip if flags irrelevant */
+	/*
+	 * NB: must be a stable sort to preserve the existing order
+	 * of mechanisms that are equally weighted.
+	 */
+	mergesort_r(mechs->elements, mechs->count,
+		    sizeof(gss_OID_desc), mech_compare, &req_flags);
+    }
+}
 
 static OM_uint32
 add_mech_type(OM_uint32 *minor_status,
@@ -298,6 +384,7 @@ add_mech_if_approved(OM_uint32 *minor_status,
 OM_uint32 GSSAPI_CALLCONV
 _gss_spnego_indicate_mechtypelist (OM_uint32 *minor_status,
 				   gss_const_name_t target_name,
+				   OM_uint32 req_flags,
 				   OM_uint32 (*func)(OM_uint32 *, void *, gss_const_name_t, gss_const_cred_id_t, gss_OID),
 				   void *userptr,
 				   int includeMSCompatOID,
@@ -310,18 +397,21 @@ _gss_spnego_indicate_mechtypelist (OM_uint32 *minor_status,
     OM_uint32 ret, minor;
     OM_uint32 first_major = GSS_S_BAD_MECH, first_minor = 0;
     size_t i;
-    int added_negoex = FALSE;
+    int added_negoex = FALSE, canonical_order = FALSE;
 
     mechtypelist->len = 0;
     mechtypelist->val = NULL;
 
     if (cred_handle != GSS_C_NO_CREDENTIAL)
-	ret = _gss_spnego_inquire_cred_mechs(minor_status,
-					     cred_handle, &supported_mechs);
+	ret = _gss_spnego_inquire_cred_mechs(minor_status, cred_handle,
+					     &supported_mechs, &canonical_order);
     else
 	ret = _gss_spnego_indicate_mechs(minor_status, &supported_mechs);
     if (ret != GSS_S_COMPLETE)
 	return ret;
+
+    if (!canonical_order)
+	order_mechs_by_flags(supported_mechs, req_flags);
 
     heim_assert(supported_mechs != GSS_C_NO_OID_SET,
 		"NULL mech set returned by SPNEGO inquire/indicate mechs");
@@ -533,40 +623,48 @@ _gss_spnego_indicate_mechs(OM_uint32 *minor_status,
 OM_uint32
 _gss_spnego_inquire_cred_mechs(OM_uint32 *minor_status,
 			       gss_const_cred_id_t cred,
-			       gss_OID_set *mechs_p)
+			       gss_OID_set *mechs_p,
+			       int *canonical_order)
 {
     OM_uint32 ret, junk;
     gss_OID_set cred_mechs = GSS_C_NO_OID_SET;
-    gss_OID_set mechs = GSS_C_NO_OID_SET;
+    gss_OID_set negotiable_mechs = GSS_C_NO_OID_SET;
     size_t i;
 
     *mechs_p = GSS_C_NO_OID_SET;
+    *canonical_order = FALSE;
 
     heim_assert(cred != GSS_C_NO_CREDENTIAL, "Invalid null credential handle");
 
-    ret = gss_inquire_cred(minor_status, cred, NULL, NULL, NULL, &cred_mechs);
+    ret = gss_get_neg_mechs(minor_status, cred, &cred_mechs);
+    if (ret == GSS_S_COMPLETE) {
+	*canonical_order = TRUE;
+    } else {
+	ret = gss_inquire_cred(minor_status, cred, NULL, NULL, NULL, &cred_mechs);
+	if (ret != GSS_S_COMPLETE)
+	    goto out;
+    }
+
+    heim_assert(cred_mechs != GSS_C_NO_OID_SET && cred_mechs->count > 0,
+		"gss_inquire_cred succeeded but returned no mechanisms");
+
+    ret = _gss_spnego_indicate_mechs(minor_status, &negotiable_mechs);
     if (ret != GSS_S_COMPLETE)
 	goto out;
 
-    heim_assert(cred_mechs != GSS_C_NO_OID_SET,
-		"gss_inquire_cred succeeded but returned null OID set");
-
-    ret = _gss_spnego_indicate_mechs(minor_status, &mechs);
-    if (ret != GSS_S_COMPLETE)
-	goto out;
-
-    heim_assert(mechs != GSS_C_NO_OID_SET,
+    heim_assert(negotiable_mechs != GSS_C_NO_OID_SET,
 		"_gss_spnego_indicate_mechs succeeded but returned null OID set");
 
     ret = gss_create_empty_oid_set(minor_status, mechs_p);
     if (ret != GSS_S_COMPLETE)
 	goto out;
 
+    /* Filter credential mechs by negotiable mechs, order by credential mechs */
     for (i = 0; i < cred_mechs->count; i++) {
 	gss_OID cred_mech = &cred_mechs->elements[i];
 	int present = 0;
 
-	gss_test_oid_set_member(&junk, cred_mech, mechs, &present);
+	gss_test_oid_set_member(&junk, cred_mech, negotiable_mechs, &present);
 	if (!present)
 	    continue;
 
@@ -579,7 +677,7 @@ out:
     if (ret != GSS_S_COMPLETE)
 	gss_release_oid_set(&junk, mechs_p);
     gss_release_oid_set(&junk, &cred_mechs);
-    gss_release_oid_set(&junk, &mechs);
+    gss_release_oid_set(&junk, &negotiable_mechs);
 
     return ret;
 }

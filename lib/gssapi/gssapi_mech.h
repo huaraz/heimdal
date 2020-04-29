@@ -486,16 +486,6 @@ _gss_store_cred_into2_t(OM_uint32 *minor_status,
                         gss_buffer_set_t *env);
 
 typedef OM_uint32 GSSAPI_CALLCONV
-_gss_set_neg_mechs_t(OM_uint32 *minor_status,
-		     gss_cred_id_t cred_handle,
-		     const gss_OID_set mechs);
-
-typedef OM_uint32 GSSAPI_CALLCONV
-_gss_get_neg_mechs_t(OM_uint32 *minor_status,
-		     gss_const_cred_id_t cred_handle,
-		     gss_OID_set *mechs);
-
-typedef OM_uint32 GSSAPI_CALLCONV
 _gss_query_mechanism_info_t(OM_uint32 *minor_status,
 			    gss_const_OID mech_oid,
 			    unsigned char auth_scheme[16]);
@@ -563,6 +553,7 @@ struct gss_mech_compat_desc_struct;
 
 /* gm_flags */
 #define GM_USE_MG_CRED      	1	/* uses mech glue credentials */
+#define GM_USE_MG_NAME      	2	/* uses mech glue names       */
 
 typedef struct gssapi_mech_interface_desc {
 	unsigned			gm_version;
@@ -629,8 +620,6 @@ typedef struct gssapi_mech_interface_desc {
         _gss_duplicate_cred_t           *gm_duplicate_cred;
 	_gss_add_cred_from_t		*gm_add_cred_from;
 	_gss_store_cred_into_t		*gm_store_cred_into;
-	_gss_set_neg_mechs_t		*gm_set_neg_mechs;
-	_gss_get_neg_mechs_t		*gm_get_neg_mechs;
 	_gss_query_mechanism_info_t	*gm_query_mechanism_info;
 	_gss_query_meta_data_t		*gm_query_meta_data;
 	_gss_exchange_meta_data_t	*gm_exchange_meta_data;
@@ -647,6 +636,7 @@ _gss_mg_support_mechanism(gss_const_OID mech);
 gssapi_mech_interface __gss_spnego_initialize(void);
 gssapi_mech_interface __gss_krb5_initialize(void);
 gssapi_mech_interface __gss_ntlm_initialize(void);
+gssapi_mech_interface __gss_sanon_initialize(void);
 
 void		gss_mg_collect_error(gss_OID, OM_uint32, OM_uint32);
 

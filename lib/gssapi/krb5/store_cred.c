@@ -44,8 +44,8 @@ same_princ(krb5_context context, krb5_ccache id1, krb5_ccache id2)
     ret = krb5_cc_get_principal(context, id1, &p1);
     if (ret == 0)
         ret = krb5_cc_get_principal(context, id2, &p2);
-    if (ret == 0)
-        same = krb5_principal_compare(context, p1, p2);
+    /* If either principal is absent, it's the same for our purposes */
+    same = ret ? 1 : krb5_principal_compare(context, p1, p2);
     krb5_free_principal(context, p1);
     krb5_free_principal(context, p2);
     return same;
@@ -76,17 +76,47 @@ add_env(OM_uint32 *minor,
 static OM_uint32
 set_proc(OM_uint32 *minor, gss_buffer_set_t env)
 {
-    size_t i;
-
     /*
      * XXX On systems with setpag(), call setpag().  On WIN32... create a
      * session, set the access token, ...?
      */
 #ifndef WIN32
+    size_t i;
+
     for (i = 0; i < env->count; i++)
         putenv(env->elements[i].value);
 #endif
     return GSS_S_COMPLETE;
+}
+
+/*
+ * A principal is the best principal for a user IFF
+ *
+ *  - it has one component
+ *  - the one component is the same as the user's name
+ *  - the real is the user_realm from configuration
+ */
+static int
+principal_is_best_for_user(krb5_context context,
+                           const char *app,
+                           krb5_const_principal p,
+                           const char *user)
+{
+    char *default_realm = NULL;
+    char *user_realm = NULL;
+    int ret;
+
+    (void) krb5_get_default_realm(context, &default_realm);
+    krb5_appdefault_string(context, app, NULL, "user_realm", default_realm,
+                           &user_realm);
+    ret = user_realm &&
+        krb5_principal_get_num_comp(context, p) == 1 &&
+        strcmp(user_realm, krb5_principal_get_realm(context, p)) == 0 &&
+        (!user ||
+         strcmp(user, krb5_principal_get_comp_string(context, p, 0)) == 0);
+    free(default_realm);
+    free(user_realm);
+    return ret;
 }
 
 OM_uint32 GSSAPI_CALLCONV
@@ -107,10 +137,14 @@ _gsskrb5_store_cred_into2(OM_uint32         *minor_status,
     time_t exp_current;
     time_t exp_new;
     gss_buffer_set_t env = GSS_C_NO_BUFFER_SET;
+    const char *cs_unique_ccache = NULL;
     const char *cs_ccache_name = NULL;
+    const char *cs_user_name = NULL;
+    const char *cs_app_name = NULL;
+    char *ccache_name = NULL;
     OM_uint32 major_status, junk;
     OM_uint32 overwrite_cred = store_cred_flags & GSS_C_STORE_CRED_OVERWRITE;
-    OM_uint32 default_cred = store_cred_flags & GSS_C_STORE_CRED_DEFAULT;
+    int default_for = 0;
 
     *minor_status = 0;
 
@@ -140,11 +174,20 @@ _gsskrb5_store_cred_into2(OM_uint32         *minor_status,
     /* Extract the ccache name from the store if given */
     if (cred_store != GSS_C_NO_CRED_STORE) {
 	major_status = __gsskrb5_cred_store_find(minor_status, cred_store,
+                                                 "unique_ccache_type",
+                                                 &cs_unique_ccache);
+	if (GSS_ERROR(major_status))
+	    return major_status;
+	major_status = __gsskrb5_cred_store_find(minor_status, cred_store,
 						 "ccache", &cs_ccache_name);
-	if (major_status == GSS_S_COMPLETE && cs_ccache_name == NULL) {
-	    *minor_status = GSS_KRB5_S_G_UNKNOWN_CRED_STORE_ELEMENT;
-	    major_status = GSS_S_NO_CRED;
-	}
+	if (GSS_ERROR(major_status))
+	    return major_status;
+	major_status = __gsskrb5_cred_store_find(minor_status, cred_store,
+						 "username", &cs_user_name);
+	if (GSS_ERROR(major_status))
+	    return major_status;
+	major_status = __gsskrb5_cred_store_find(minor_status, cred_store,
+						 "appname", &cs_app_name);
 	if (GSS_ERROR(major_status))
 	    return major_status;
     }
@@ -152,34 +195,68 @@ _gsskrb5_store_cred_into2(OM_uint32         *minor_status,
     GSSAPI_KRB5_INIT (&context);
     HEIMDAL_MUTEX_lock(&input_cred->cred_id_mutex);
 
+    if (cs_ccache_name && strchr(cs_ccache_name, '%')) {
+        ret = _krb5_expand_default_cc_name(context, cs_ccache_name,
+                                           &ccache_name);
+        if (ret) {
+            HEIMDAL_MUTEX_unlock(&input_cred->cred_id_mutex);
+            *minor_status = ret;
+            return GSS_S_FAILURE;
+        }
+        cs_ccache_name = ccache_name;
+    }
+
     /* More sanity checking of the input_cred (good to fail early) */
     ret = krb5_cc_get_lifetime(context, input_cred->ccache, &exp_new);
     if (ret) {
 	HEIMDAL_MUTEX_unlock(&input_cred->cred_id_mutex);
 	*minor_status = ret;
+        free(ccache_name);
 	return GSS_S_NO_CRED;
     }
 
+    /*
+     * Find an appropriate ccache, which will be one of:
+     *
+     *  - the one given in the cred_store, if given
+     *  - a new unique one for some ccache type in the cred_store, if given
+     *  - a subsidiary cache named for the principal in the default collection,
+     *    if the principal is the "best principal for the user"
+     *  - the default ccache
+     */
     if (cs_ccache_name) {
-        default_cred = 0;
         ret = krb5_cc_resolve(context, cs_ccache_name, &id);
+    } else if (cs_unique_ccache) {
+        overwrite_cred = 1;
+        ret = krb5_cc_new_unique(context, cs_unique_ccache, NULL, &id);
+    } else if (principal_is_best_for_user(context, cs_app_name,
+                                          input_cred->principal,
+                                          cs_user_name)) {
+        ret = krb5_cc_default(context, &id);
+        if (ret == 0 && !same_princ(context, id, input_cred->ccache)) {
+            krb5_cc_close(context, id);
+            ret = krb5_cc_default_for(context, input_cred->principal, &id);
+            default_for = 1;
+        }
     } else {
-        /*
-         * Use the default ccache, and if it's a collection, switch it if
-         * default_cred is true.
-         */
         ret = krb5_cc_default_for(context, input_cred->principal, &id);
-        if (ret == 0 &&
-            krb5_cc_support_switch(context, krb5_cc_get_type(context, id)))
-            overwrite_cred = 1;
+        default_for = 1;
     }
 
     if (ret || id == NULL) {
 	HEIMDAL_MUTEX_unlock(&input_cred->cred_id_mutex);
 	*minor_status = ret;
+        free(ccache_name);
 	return ret == 0 ? GSS_S_NO_CRED : GSS_S_FAILURE;
     }
 
+    /*
+     * If we're using a subsidiary ccache for this principal and it has some
+     * other principal's tickets in it -> overwrite.
+     */
+    if (!overwrite_cred && default_for &&
+        !same_princ(context, id, input_cred->ccache))
+        overwrite_cred = 1;
     if (!overwrite_cred && same_princ(context, id, input_cred->ccache)) {
         /*
          * If current creds are for the same princ as we already had creds for,
@@ -190,20 +267,12 @@ _gsskrb5_store_cred_into2(OM_uint32         *minor_status,
             overwrite_cred = 1;
     }
 
-    if (!overwrite_cred) {
-        /* Nothing to do */
-        HEIMDAL_MUTEX_unlock(&input_cred->cred_id_mutex);
-        krb5_cc_close(context, id);
-        *minor_status = 0;
-        return GSS_S_DUPLICATE_ELEMENT;
+    if (overwrite_cred) {
+        ret = krb5_cc_initialize(context, id, input_cred->principal);
+        if (ret == 0)
+            ret = krb5_cc_copy_match_f(context, input_cred->ccache, id, NULL, NULL,
+                                       NULL);
     }
-
-    ret = krb5_cc_initialize(context, id, input_cred->principal);
-    if (ret == 0)
-        ret = krb5_cc_copy_match_f(context, input_cred->ccache, id, NULL, NULL,
-                                   NULL);
-    if (ret == 0 && default_cred)
-        krb5_cc_switch(context, id);
 
     if ((store_cred_flags & GSS_C_STORE_CRED_SET_PROCESS) && envp == NULL)
         envp = &env;
@@ -224,6 +293,7 @@ _gsskrb5_store_cred_into2(OM_uint32         *minor_status,
         (major_status = set_proc(minor_status, *envp)) != GSS_S_COMPLETE)
         ret = *minor_status;
     (void) gss_release_buffer_set(&junk, &env);
+    free(ccache_name);
     *minor_status = ret;
     return ret ? GSS_S_FAILURE : GSS_S_COMPLETE;
 }
