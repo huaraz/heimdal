@@ -125,7 +125,9 @@ hx509_get_instance(const char *libname)
     return 0;
 }
 
-#define PATH_SEP ":"
+#ifndef PATH_SEP
+# define PATH_SEP ":"
+#endif
 static const char *hx509_config_file =
 "~/.hx509/config" PATH_SEP
 SYSCONFDIR "/hx509.conf" PATH_SEP
@@ -260,6 +262,7 @@ hx509_context_free(hx509_context *context)
     free_error_table ((*context)->et_list);
     if ((*context)->querystat)
 	free((*context)->querystat);
+    heim_config_file_free((*context)->hcontext, (*context)->cf);
     heim_context_free(&(*context)->hcontext);
     memset(*context, 0, sizeof(**context));
     free(*context);

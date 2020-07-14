@@ -92,6 +92,7 @@ typedef struct gsskrb5_ctx {
 
 typedef struct {
   krb5_principal principal;
+  char *destination_realm;  /* Realm of acceptor service, if delegated */
   int cred_flags;
 #define GSS_CF_DESTROY_CRED_ON_RELEASE	1
 #define GSS_CF_NO_CI_FLAGS		2
@@ -117,7 +118,7 @@ extern HEIMDAL_MUTEX gssapi_keytab_mutex;
  * Prototypes
  */
 
-#include "gsskrb5-private.h"
+#include "krb5/gsskrb5-private.h"
 
 #define GSSAPI_KRB5_INIT(ctx) do {				\
     krb5_error_code kret_gss_init;				\

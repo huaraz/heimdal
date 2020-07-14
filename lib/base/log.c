@@ -35,6 +35,7 @@
 
 #include "baselocl.h"
 #include "heim_threads.h"
+#include "heimbase.h"
 #include "heimbase-svc.h"
 #include <assert.h>
 #include <stdarg.h>
@@ -159,7 +160,7 @@ struct _heimdal_syslog_data{
     int priority;
 };
 
-static void
+static void HEIM_CALLCONV
 log_syslog(heim_context context, const char *timestr,
            const char *msg, void *data)
 {
@@ -167,7 +168,7 @@ log_syslog(heim_context context, const char *timestr,
     syslog(s->priority, "%s", msg);
 }
 
-static void
+static void HEIM_CALLCONV
 close_syslog(void *data)
 {
     free(data);
@@ -209,7 +210,7 @@ struct file_data {
     int freefilename;
 };
 
-static void
+static void HEIM_CALLCONV
 log_file(heim_context context, const char *timestr, const char *msg, void *data)
 {
     struct timeval tv;
@@ -274,7 +275,7 @@ out:
     }
 }
 
-static void
+static void HEIM_CALLCONV
 close_file(void *data)
 {
     struct file_data *f = data;
@@ -637,18 +638,18 @@ fmtkv(int flags, const char *k, const char *fmt, va_list ap)
         __attribute__ ((__format__ (__printf__, 3, 0)))
 {
     heim_string_t str;
-    size_t i,j;
+    size_t i;
+    ssize_t j;
     char *buf1;
     char *buf2;
     char *buf3;
-
-    vasprintf(&buf1, fmt, ap);
-    if (!buf1)
+    int ret = vasprintf(&buf1, fmt, ap);
+    if (ret < 0 || !buf1)
 	return NULL;;
 
     j = asprintf(&buf2, "%s=%s", k, buf1);
     free(buf1);
-    if (!buf2)
+    if (j < 0 || !buf2)
 	return NULL;;
 
     /* We optionally eat the whitespace. */
