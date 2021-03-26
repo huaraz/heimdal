@@ -43,7 +43,9 @@ static krb5_log_facility *log_facility;
 static char five_min[] = "5 min";
 static char *server_time_lost = five_min;
 static int time_before_lost;
-const char *slave_str = NULL;
+static const char *slave_str;
+static const char *pidfile_basename;
+static char *realm;
 
 static int
 connect_to_master (krb5_context context, const char *master,
@@ -135,10 +137,12 @@ get_creds(krb5_context context, const char *keytab_str,
     if(ret)
 	krb5_err(context, 1, ret, "%s", keytab_str);
 
-
-    ret = krb5_sname_to_principal (context, slave_str, IPROP_NAME,
-				   KRB5_NT_SRV_HST, &client);
+    ret = krb5_sname_to_principal(context, slave_str, IPROP_NAME,
+                                  KRB5_NT_SRV_HST, &client);
     if (ret) krb5_err(context, 1, ret, "krb5_sname_to_principal");
+    if (realm)
+        ret = krb5_principal_set_realm(context, client, realm);
+    if (ret) krb5_err(context, 1, ret, "krb5_principal_set_realm");
 
     ret = krb5_get_init_creds_opt_alloc(context, &init_opts);
     if (ret) krb5_err(context, 1, ret, "krb5_get_init_creds_opt_alloc");
@@ -256,6 +260,10 @@ append_to_log_file(krb5_context context,
         ret = fsync(server_context->log_context.log_fd);
     if (ret == 0)
         return 0;
+    krb5_warn(context, ret,
+              "Failed to write iprop log fd %d %llu bytes at offset %lld: %d",
+              server_context->log_context.log_fd, (unsigned long long)len,
+              (long long)log_off, ret);
 
     /*
      * Attempt to recover from this.  First, truncate the log file
@@ -305,9 +313,9 @@ append_to_log_file(krb5_context context,
 }
 
 static int
-receive_loop (krb5_context context,
-	      krb5_storage *sp,
-	      kadm5_server_context *server_context)
+receive_loop(krb5_context context,
+	     krb5_storage *sp,
+	     kadm5_server_context *server_context)
 {
     int ret;
     off_t left, right, off;
@@ -315,6 +323,11 @@ receive_loop (krb5_context context,
 
     if (verbose)
         krb5_warnx(context, "receiving diffs");
+
+    ret = kadm5_log_exclusivelock(server_context);
+    if (ret)
+        krb5_err(context, IPROPD_RESTART, ret,
+                 "Failed to lock iprop log for writes");
 
     /*
      * Seek to the first entry in the message from the master that is
@@ -433,6 +446,12 @@ receive(krb5_context context,
     if (ret)
         krb5_err(context, IPROPD_RESTART_SLOW, ret, "db->close");
 
+    (void) kadm5_log_sharedlock(server_context);
+    if (verbose)
+        krb5_warnx(context, "downgraded iprop log lock to shared");
+    kadm5_log_signal_master(server_context);
+    if (verbose)
+        krb5_warnx(context, "signaled master for hierarchical iprop");
     return ret2;
 }
 
@@ -481,6 +500,9 @@ reinit_log(krb5_context context,
     ret = kadm5_log_reinit(server_context, vno);
     if (ret)
         krb5_err(context, IPROPD_RESTART_SLOW, ret, "kadm5_log_reinit");
+    (void) kadm5_log_sharedlock(server_context);
+    if (verbose)
+        krb5_warnx(context, "downgraded iprop log lock to shared");
 }
 
 
@@ -500,6 +522,10 @@ receive_everything(krb5_context context, int fd,
 
     krb5_warnx(context, "receive complete database");
 
+    ret = kadm5_log_exclusivelock(server_context);
+    if (ret)
+        krb5_err(context, IPROPD_RESTART, ret,
+                 "Failed to lock iprop log for writes");
     ret = asprintf(&dbname, "%s-NEW", server_context->db->hdb_name);
     if (ret == -1)
         krb5_err(context, IPROPD_RESTART, ENOMEM, "asprintf");
@@ -629,9 +655,8 @@ slave_status(krb5_context context,
 	(void) unlink(file);
 	return;
     }
-    krb5_warnx(context, "slave status change: %s", status);
-    
     rk_dumpdata(file, status, len);
+    krb5_warnx(context, "slave status change: %s", status);
     free(status);
 }
 
@@ -652,7 +677,6 @@ is_up_to_date(krb5_context context, const char *file,
 
 static char *status_file;
 static char *config_file;
-static char *realm;
 static int version_flag;
 static int help_flag;
 static char *keytab_str;
@@ -673,8 +697,10 @@ static struct getargs args[] = {
       "port ipropd-slave will connect to", "port"},
     { "detach", 0, arg_flag, &detach_from_console,
       "detach from console", NULL },
-    { "daemon-child",       0 ,      arg_integer, &daemon_child,
+    { "daemon-child", 0, arg_integer, &daemon_child,
       "private argument, do not use", NULL },
+    { "pidfile-basename", 0, arg_string, &pidfile_basename,
+      "basename of pidfile; private argument for testing", "NAME" },
     { "hostname", 0, arg_string, rk_UNCONST(&slave_str),
       "hostname of slave (if not same as hostname)", "hostname" },
     { "verbose", 0, arg_flag, &verbose, NULL, NULL },
@@ -729,7 +755,7 @@ main(int argc, char **argv)
 
     if (detach_from_console && daemon_child == -1)
         daemon_child = roken_detach_prep(argc, argv, "--daemon-child");
-    rk_pidfile(NULL);
+    rk_pidfile(pidfile_basename);
 
     ret = krb5_init_context(&context);
     if (ret)
@@ -804,13 +830,16 @@ main(int argc, char **argv)
     if (ret)
 	krb5_err (context, 1, ret, "db->open");
 
-    ret = kadm5_log_init (server_context);
+    ret = kadm5_log_init(server_context);
     if (ret)
-	krb5_err (context, 1, ret, "kadm5_log_init");
+	krb5_err(context, 1, ret, "kadm5_log_init");
+    (void) kadm5_log_sharedlock(server_context);
+    if (verbose)
+        krb5_warnx(context, "downgraded iprop log lock to shared");
 
-    ret = server_context->db->hdb_close (context, server_context->db);
+    ret = server_context->db->hdb_close(context, server_context->db);
     if (ret)
-	krb5_err (context, 1, ret, "db->close");
+	krb5_err(context, 1, ret, "db->close");
 
     get_creds(context, keytab_str, &ccache, master);
 
@@ -977,18 +1006,30 @@ main(int argc, char **argv)
                 continue;
             }
 
+            /*
+             * It's unclear why we open th HDB and call kadm5_log_init() here.
+             *
+             * We don't need it to process the log entries we receive in the
+             * FOR_YOU case: we already call kadm5_log_recover() in receive() /
+             * receive_loop().  Maybe it's just just in case, though at the
+             * cost of synchronization with ipropd-master if we're running one
+             * for hierarchical iprop.
+             */
 	    ret = server_context->db->hdb_open(context,
 					       server_context->db,
 					       O_RDWR | O_CREAT, 0600);
 	    if (ret)
 		krb5_err (context, 1, ret, "db->open while handling a "
 			  "message from the master");
-
             ret = kadm5_log_init(server_context);
             if (ret) {
                 krb5_err(context, IPROPD_RESTART, ret, "kadm5_log_init while "
                          "handling a message from the master");
             }
+            (void) kadm5_log_sharedlock(server_context);
+            if (verbose)
+                krb5_warnx(context, "downgraded iprop log lock to shared");
+
 	    ret = server_context->db->hdb_close (context, server_context->db);
 	    if (ret)
 		krb5_err (context, 1, ret, "db->close while handling a "
@@ -1019,6 +1060,7 @@ main(int argc, char **argv)
                     krb5_warnx(context, "master sent us a full dump");
 		ret = receive_everything(context, master_fd, server_context,
 					 auth_context);
+                (void) kadm5_log_sharedlock(server_context);
                 if (ret == 0) {
                     ret = ihave(context, auth_context, master_fd,
                                 server_context->log_context.version);
@@ -1027,6 +1069,11 @@ main(int argc, char **argv)
 		    connected = FALSE;
                 else
                     is_up_to_date(context, status_file, server_context);
+                if (verbose)
+                    krb5_warnx(context, "downgraded iprop log lock to shared");
+                kadm5_log_signal_master(server_context);
+                if (verbose)
+                    krb5_warnx(context, "signaled master for hierarchical iprop");
 		break;
 	    case ARE_YOU_THERE :
                 if (verbose)

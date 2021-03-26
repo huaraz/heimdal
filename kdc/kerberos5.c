@@ -140,6 +140,16 @@ _kdc_is_anon_request(const KDC_REQ *req)
  * return the first appropriate key of `princ' in `ret_key'.  Look for
  * all the etypes in (`etypes', `len'), stopping as soon as we find
  * one, but preferring one that has default salt.
+ *
+ * XXX This function does way way too much.  Split it up!
+ *
+ * XXX `etypes' and `len' are always `b->etype.val' and `b->etype.len' -- the
+ *     etype list from the KDC-REQ-BODY, which is available here as
+ *     `r->req->req_body', so we could just stop having it passed in.
+ *
+ * XXX Picking an enctype(s) for PA-ETYPE-INFO* is rather different than
+ *     picking an enctype for a ticket's session key.  The former is what we do
+ *     here when `(flags & KFE_IS_PREAUTH)', the latter otherwise.
  */
 
 krb5_error_code
@@ -159,7 +169,7 @@ _kdc_find_etype(astgs_request_t r, uint32_t flags,
     krb5_enctype enctype = (krb5_enctype)ETYPE_NULL;
     const krb5_enctype *p;
     Key *key = NULL;
-    int i, k;
+    size_t i, k, m;
 
     if (flags & KFE_USE_CLIENT) {
 	princ = r->client;
@@ -181,8 +191,22 @@ _kdc_find_etype(astgs_request_t r, uint32_t flags,
 
     ret = KRB5KDC_ERR_ETYPE_NOSUPP;
 
-    if (use_strongest_session_key) {
+    /*
+     * Pick an enctype that is in the intersection of:
+     *
+     *  - permitted_enctypes (local policy)
+     *  - requested enctypes (KDC-REQ-BODY's etype list)
+     *  - the client's long-term keys' enctypes
+     *    OR
+     *    the server's configured etype list
+     *
+     * There are two sub-cases:
+     *
+     *  - use local enctype preference (local policy)
+     *  - use the client's preference list
+     */
 
+    if (use_strongest_session_key) {
 	/*
 	 * Pick the strongest key that the KDC, target service, and
 	 * client all support, using the local cryptosystem enctype
@@ -191,7 +215,7 @@ _kdc_find_etype(astgs_request_t r, uint32_t flags,
 	 * This is not what RFC4120 says to do, but it encourages
 	 * adoption of stronger enctypes.  This doesn't play well with
 	 * clients that have multiple Kerberos client implementations
-	 * available with different supported enctype lists.
+	 * with different supported enctype lists sharing the same ccache.
 	 */
 
 	/* drive the search with local supported enctypes list */
@@ -209,20 +233,51 @@ _kdc_find_etype(astgs_request_t r, uint32_t flags,
 		if (p[i] != etypes[k])
 		    continue;
 
+                if (!is_preauth && (flags & KFE_USE_CLIENT)) {
+                    /*
+                     * It suffices that the client says it supports this
+                     * enctype in its KDC-REQ-BODY's etype list, which is what
+                     * `etypes' is here.
+                     */
+                    ret = 0;
+                    break;
+                }
+
                 /* check target princ support */
 		key = NULL;
-		while (hdb_next_enctype2key(context, &princ->entry, NULL,
-					     p[i], &key) == 0) {
-		    if (key->key.keyvalue.length == 0) {
-			ret = KRB5KDC_ERR_NULL_KEY;
-			continue;
-		    }
-		    enctype = p[i];
-		    ret = 0;
-		    if (is_preauth && ret_key != NULL &&
-			!is_default_salt_p(&def_salt, key))
-			continue;
-		}
+                if (!(flags & KFE_USE_CLIENT) && princ->entry.etypes) {
+                    /*
+                     * Use the etypes list from the server's HDB entry instead
+                     * of deriving it from its long-term keys.  This allows an
+                     * entry to have just one long-term key but record support
+                     * for multiple enctypes.
+                     */
+                    for (m = 0; m < princ->entry.etypes->len; m++) {
+                        if (p[i] == princ->entry.etypes->val[m]) {
+                            ret = 0;
+                            break;
+                        }
+                    }
+                } else {
+                    /*
+                     * Use the entry's long-term keys as the source of its
+                     * supported enctypes, either because we're making
+                     * PA-ETYPE-INFO* or because we're selecting a session key
+                     * enctype.
+                     */
+                    while (hdb_next_enctype2key(context, &princ->entry, NULL,
+                                                 p[i], &key) == 0) {
+                        if (key->key.keyvalue.length == 0) {
+                            ret = KRB5KDC_ERR_NULL_KEY;
+                            continue;
+                        }
+                        enctype = p[i];
+                        ret = 0;
+                        if (is_preauth && ret_key != NULL &&
+                            !is_default_salt_p(&def_salt, key))
+                            continue;
+                    }
+                }
 	    }
 	}
     } else {
@@ -424,6 +479,9 @@ pa_pkinit_validate(astgs_request_t r, const PA_DATA *pa)
 			"impersonate principal");
 	goto out;
     }
+
+    r->pa_endtime = _kdc_pk_endtime(pkp);
+    r->pa_max_life = _kdc_pk_max_life(pkp);
 
     _kdc_r_log(r, 4, "PKINIT pre-authentication succeeded -- %s using %s",
 	       r->cname, client_cert);
@@ -1883,6 +1941,12 @@ _kdc_as_rep(astgs_request_t r)
 	goto out;
     }
     default:
+        /*
+         * We could have an option to synthetically construct an HDB entry for
+         * the client from its certificate, if it used PKINIT and its cert has
+         * the PKINIT SAN.  We could have a default HDB entry for this case to
+         * provide default field values.
+         */
 	msg = krb5_get_error_message(context, ret);
 	kdc_log(context, config, 4, "UNKNOWN -- %s: %s", r->cname, msg);
 	krb5_free_error_message(context, msg);
@@ -1890,7 +1954,8 @@ _kdc_as_rep(astgs_request_t r)
 	goto out;
     }
     ret = _kdc_db_fetch(context, config, r->server_princ,
-			HDB_F_GET_SERVER | flags | (is_tgs ? HDB_F_GET_KRBTGT : 0),
+			HDB_F_GET_SERVER | HDB_F_DELAY_NEW_KEYS |
+			flags | (is_tgs ? HDB_F_GET_KRBTGT : 0),
 			NULL, NULL, &r->server);
     switch (ret) {
     case 0:	/* Success */
@@ -1908,16 +1973,10 @@ _kdc_as_rep(astgs_request_t r)
     }
 
     /*
-     * Select a session enctype from the list of the crypto system
-     * supported enctypes that is supported by the client and is one of
-     * the enctype of the enctype of the service (likely krbtgt).
-     *
-     * The latter is used as a hint of what enctypes all KDC support,
-     * to make sure a newer version of KDC won't generate a session
-     * enctype that an older version of a KDC in the same realm can't
-     * decrypt.
+     * Select an enctype for the to-be-issued ticket's session key using the
+     * intersection of the client's requested enctypes and the server's (like a
+     * root krbtgt, but not necessarily) etypes from its HDB entry.
      */
-
     ret = _kdc_find_etype(r, (is_tgs ?  KFE_IS_TGS:0) | KFE_USE_CLIENT,
 			  b->etype.val, b->etype.len,
 			  &r->sessionetype, NULL, NULL);
@@ -2166,10 +2225,23 @@ _kdc_as_rep(astgs_request_t r)
 
 	/* be careful not overflowing */
 
-	if(r->client->entry.max_life)
+        /*
+         * Pre-auth can override r->client->entry.max_life if configured.
+         *
+         * See pre-auth methods, specifically PKINIT, which can get or derive
+         * this from the client's certificate.
+         */
+        if (r->pa_max_life > 0)
+            t = start + min(t - start, r->pa_max_life);
+        else if (r->client->entry.max_life)
 	    t = start + min(t - start, *r->client->entry.max_life);
-	if(r->server->entry.max_life)
+
+	if (r->server->entry.max_life)
 	    t = start + min(t - start, *r->server->entry.max_life);
+
+        /* Pre-auth can bound endtime as well */
+        if (r->pa_endtime > 0)
+            t = start + min(t - start, r->pa_endtime);
 #if 0
 	t = min(t, start + realm->max_life);
 #endif
@@ -2205,7 +2277,7 @@ _kdc_as_rep(astgs_request_t r)
 	copy_HostAddresses(b->addresses, r->et.caddr);
     }
 
-    r->et.transited.tr_type = DOMAIN_X500_COMPRESS;
+    r->et.transited.tr_type = domain_X500_Compress;
     krb5_data_zero(&r->et.transited.contents);
 
     /* The MIT ASN.1 library (obviously) doesn't tell lengths encoded

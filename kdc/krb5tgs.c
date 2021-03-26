@@ -658,7 +658,7 @@ fix_transited_encoding(krb5_context context,
     size_t i;
 
     switch (tr->tr_type) {
-    case DOMAIN_X500_COMPRESS:
+    case domain_X500_Compress:
 	break;
     case 0:
 	/*
@@ -744,7 +744,7 @@ fix_transited_encoding(krb5_context context,
 	}
 	et->flags.transited_policy_checked = 1;
     }
-    et->transited.tr_type = DOMAIN_X500_COMPRESS;
+    et->transited.tr_type = domain_X500_Compress;
     ret = krb5_domain_x500_encode(realms, num_realms, &et->transited.contents);
     if(ret)
 	krb5_warn(context, ret, "Encoding transited encoding");
@@ -1702,7 +1702,8 @@ tgs_build_reply(astgs_request_t priv,
      */
 
 server_lookup:
-    ret = _kdc_db_fetch(context, config, sp, HDB_F_GET_SERVER | flags,
+    ret = _kdc_db_fetch(context, config, sp,
+                        HDB_F_GET_SERVER | HDB_F_DELAY_NEW_KEYS | flags,
 			NULL, NULL, &server);
     priv->server = server;
     if (ret == HDB_ERR_NOT_FOUND_HERE) {

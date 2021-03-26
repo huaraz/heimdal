@@ -100,6 +100,11 @@ main (int argc, char **argv)
 * @endcode
 */
 
+static const krb5_cc_ops *
+cc_get_prefix_ops(krb5_context context,
+		  const char *prefix,
+		  const char **residual);
+
 /**
  * Add a new ccache type with operations `ops', overwriting any
  * existing one if `override'.
@@ -235,22 +240,53 @@ krb5_cc_resolve(krb5_context context,
 		const char *name,
 		krb5_ccache *id)
 {
-    int i;
+    const krb5_cc_ops *ops;
+    const char *residual = NULL;
 
     *id = NULL;
 
-    for(i = 0; i < context->num_cc_ops && context->cc_ops[i]->prefix; i++) {
-	size_t prefix_len = strlen(context->cc_ops[i]->prefix);
+    ops = cc_get_prefix_ops(context, name, &residual);
+    if (ops == NULL)
+	ops = &krb5_fcc_ops; /* residual will point to name */
 
-	if(strncmp(context->cc_ops[i]->prefix, name, prefix_len) == 0
-	   && name[prefix_len] == ':') {
-	    return allocate_ccache (context, context->cc_ops[i],
-				    name + prefix_len + 1, NULL,
-				    id);
+    return allocate_ccache(context, ops, residual, NULL, id);
+}
+
+#ifdef _WIN32
+static const char *
+get_default_cc_type_win32(krb5_context context)
+{
+    krb5_error_code ret;
+    krb5_ccache id;
+
+    /*
+     * If the MSLSA ccache type has a principal name,
+     * use it as the default.
+     */
+    ret = krb5_cc_resolve(context, "MSLSA:", &id);
+    if (ret == 0) {
+        krb5_principal princ;
+        ret = krb5_cc_get_principal(context, id, &princ);
+        krb5_cc_close(context, id);
+        if (ret == 0) {
+            krb5_free_principal(context, princ);
+	    return "MSLSA";
 	}
     }
-    return allocate_ccache(context, &krb5_fcc_ops, name, NULL, id);
+
+    /*
+     * If the API: ccache can be resolved,
+     * use it as the default.
+     */
+    ret = krb5_cc_resolve(context, "API:", &id);
+    if (ret == 0) {
+	krb5_cc_close(context, id);
+	return "API";
+    }
+
+    return NULL;
 }
+#endif /* _WIN32 */
 
 static const char *
 get_default_cc_type(krb5_context context, int simple)
@@ -263,27 +299,25 @@ get_default_cc_type(krb5_context context, int simple)
     const char *def_cccol =
         krb5_config_get_string(context, NULL, "libdefaults",
                                "default_cc_collection", NULL);
-    size_t i;
+    const krb5_cc_ops *ops;
 
     if (!simple && (def_ccname = krb5_cc_default_name(context))) {
-        for (i = 0; i < context->num_cc_ops && context->cc_ops[i]->prefix; i++) {
-            size_t prefix_len = strlen(context->cc_ops[i]->prefix);
-
-            if (!strncmp(context->cc_ops[i]->prefix, def_ccname, prefix_len) &&
-                def_ccname[prefix_len] == ':')
-                return context->cc_ops[i]->prefix;
-        }
+	ops = cc_get_prefix_ops(context, def_ccname, NULL);
+	if (ops)
+	    return ops->prefix;
     }
     if (!def_cctype && def_cccol) {
-        for (i = 0; i < context->num_cc_ops && context->cc_ops[i]->prefix; i++) {
-            size_t prefix_len = strlen(context->cc_ops[i]->prefix);
-
-            if (!strncmp(context->cc_ops[i]->prefix, def_cccol, prefix_len) &&
-                def_cccol[prefix_len] == ':')
-                return context->cc_ops[i]->prefix;
-        }
+	ops = cc_get_prefix_ops(context, def_cccol, NULL);
+	if (ops)
+	    return ops->prefix;
     }
-    return def_cctype ? def_cctype : "FILE";
+#ifdef _WIN32
+    if (def_cctype == NULL)
+	def_cctype = get_default_cc_type_win32(context);
+#endif
+    if (def_cctype == NULL)
+	def_cctype = KRB5_DEFAULT_CCTYPE->prefix;
+    return def_cctype;
 }
 
 /**
@@ -310,59 +344,24 @@ krb5_cc_resolve_sub(krb5_context context,
                     const char *subsidiary,
                     krb5_ccache *id)
 {
-    size_t i;
+    const krb5_cc_ops *ops = NULL;
 
     *id = NULL;
 
-    if (!cctype && collection) {
-        /* Get the cctype from the collection, maybe */
-        for (i = 0; i < context->num_cc_ops && context->cc_ops[i]->prefix; i++) {
-            size_t plen = strlen(context->cc_ops[i]->prefix);
+    /* Get the cctype from the collection, maybe */
+    if (cctype == NULL && collection)
+	ops = cc_get_prefix_ops(context, collection, &collection);
 
-            if ((strncmp(context->cc_ops[i]->prefix, collection, plen) ||
-                 collection[plen] != ':'))
-                continue;
-            cctype = context->cc_ops[i]->prefix;
-            collection += plen + 1;
-            break;
-        }
+    if (ops == NULL)
+	ops = cc_get_prefix_ops(context, get_default_cc_type(context, 0), NULL);
+
+    if (ops == NULL) {
+	krb5_set_error_message(context, KRB5_CC_UNKNOWN_TYPE,
+			       N_("unknown ccache type %s", ""), cctype);
+	return KRB5_CC_UNKNOWN_TYPE;
     }
 
-
-    if (!cctype) {
-        const char *def_cctype = get_default_cc_type(context, 0);
-        int might_be_path = collection != NULL;
-
-        if (def_cctype)
-            cctype = def_cctype;
-        else if (might_be_path && subsidiary)
-            cctype = "DIR";     /* Default to DIR */
-        else if (might_be_path && !subsidiary)
-            cctype = "FILE";    /* Default to FILE */
-    }
-
-    /* If either `cctype' is not NULL or `collection' starts with TYPE: */
-    if (cctype || collection) {
-        for (i = 0; i < context->num_cc_ops && context->cc_ops[i]->prefix; i++) {
-            size_t plen = strlen(context->cc_ops[i]->prefix);
-
-            if (cctype && strcmp(context->cc_ops[i]->prefix, cctype))
-                continue;
-            if (!cctype &&
-                (strncmp(context->cc_ops[i]->prefix, collection, plen) ||
-                 collection[plen] != ':'))
-                continue;
-
-            return allocate_ccache(context, context->cc_ops[i],
-                                   cctype ? collection : collection + plen + 1,
-                                   subsidiary, id);
-        }
-    }
-
-    krb5_set_error_message(context, KRB5_CC_UNKNOWN_TYPE,
-                           N_("unknown ccache type %s", ""),
-                           cctype ? cctype : collection);
-    return KRB5_CC_UNKNOWN_TYPE;
+    return allocate_ccache(context, ops, collection, subsidiary, id);
 }
 
 
@@ -777,6 +776,7 @@ krb5_cc_configured_default_name(krb5_context context)
 #endif
     const char *cfg;
     char *expanded;
+    const krb5_cc_ops *ops;
 
     if (context->configured_default_cc_name)
         return context->configured_default_cc_name;
@@ -804,61 +804,21 @@ krb5_cc_configured_default_name(krb5_context context)
 
     /* Else try a configured default ccache type's default */
     cfg = get_default_cc_type(context, 1);
-    if (cfg) {
-        const krb5_cc_ops *ops;
+    if ((ops = krb5_cc_get_prefix_ops(context, cfg)) == NULL) {
+	krb5_set_error_message(context, KRB5_CC_UNKNOWN_TYPE,
+                               "unknown configured credential cache "
+                               "type %s", cfg);
+	return NULL;
+    }
 
-        if ((ops = krb5_cc_get_prefix_ops(context, cfg)) == NULL) {
-            krb5_set_error_message(context, KRB5_CC_UNKNOWN_TYPE,
-                                   "unknown configured credential cache "
-                                   "type %s", cfg);
-            return NULL;
-        }
-
-        /* The get_default_name() method expands any tokens */
-        ret = (*ops->get_default_name)(context, &expanded);
-        if (ret) {
-            krb5_set_error_message(context, ret, "failed to find a default "
-                                   "ccache for default ccache type %s", cfg);
-            return NULL;
-        }
-        return context->configured_default_cc_name = expanded;
+    /* The get_default_name() method expands any tokens */
+    ret = (*ops->get_default_name)(context, &expanded);
+    if (ret) {
+	krb5_set_error_message(context, ret, "failed to find a default "
+			       "ccache for default ccache type %s", cfg);
+	return NULL;
     }
-#ifdef _WIN32
-    /*
-     * If the MSLSA ccache type has a principal name,
-     * use it as the default.
-     */
-    ret = krb5_cc_resolve(context, "MSLSA:", &id);
-    if (ret == 0) {
-        krb5_principal princ;
-        ret = krb5_cc_get_principal(context, id, &princ);
-        krb5_cc_close(context, id);
-        if (ret == 0) {
-            krb5_free_principal(context, princ);
-            if ((expanded = strdup("MSLSA:")))
-                return context->configured_default_cc_name = expanded;
-            krb5_enomem(context);
-            return NULL;
-        }
-    }
-    /*
-     * If the API:krb5cc ccache can be resolved,
-     * use it as the default.
-     */
-    ret = krb5_cc_resolve(context, "API:krb5cc", &id);
-    krb5_cc_close(context, id);
-    if (ret == 0) {
-        if ((expanded = strdup("MSLSA:")))
-            return context->configured_default_cc_name = expanded;
-        krb5_enomem(context);
-        return NULL;
-    }
-    /* Otherwise, fallback to the FILE ccache */
-#endif
-    ret = (*(KRB5_DEFAULT_CCTYPE)->get_default_name)(context, &expanded);
-    if (ret == 0)
-        return context->configured_default_cc_name = expanded;
-    return NULL;
+    return context->configured_default_cc_name = expanded;
 }
 
 /**
@@ -1409,8 +1369,34 @@ krb5_cc_clear_mcred(krb5_creds *mcred)
 KRB5_LIB_FUNCTION const krb5_cc_ops * KRB5_LIB_CALL
 krb5_cc_get_prefix_ops(krb5_context context, const char *prefix)
 {
-    char *p, *p1;
+    return cc_get_prefix_ops(context, prefix, NULL);
+}
+
+/**
+ * Get the cc ops that is registered in `context' to handle the
+ * prefix. prefix can be a complete credential cache name or a
+ * prefix, the function will only use part up to the first colon (:)
+ * if there is one. If prefix the argument is NULL, the default ccache
+ * implementation is returned.
+ *
+ * If residual is non-NULL, it is set to the residual component of
+ * prefix (if present) or the prefix itself.
+ *
+ * @return Returns NULL if ops not found.
+ *
+ * @ingroup krb5_ccache
+ */
+
+
+static const krb5_cc_ops *
+cc_get_prefix_ops(krb5_context context,
+		  const char *prefix,
+		  const char **residual)
+{
     int i;
+
+    if (residual)
+	*residual = prefix;
 
     if (prefix == NULL)
 	return KRB5_DEFAULT_CCTYPE;
@@ -1425,22 +1411,22 @@ krb5_cc_get_prefix_ops(krb5_context context, const char *prefix)
 	return &krb5_fcc_ops;
 #endif
 
-    p = strdup(prefix);
-    if (p == NULL) {
-	krb5_enomem(context);
-	return NULL;
-    }
-    p1 = strchr(p, ':');
-    if (p1)
-	*p1 = '\0';
-
     for(i = 0; i < context->num_cc_ops && context->cc_ops[i]->prefix; i++) {
-	if(strcmp(context->cc_ops[i]->prefix, p) == 0) {
-	    free(p);
+	size_t prefix_len = strlen(context->cc_ops[i]->prefix);
+
+	if (strncmp(context->cc_ops[i]->prefix, prefix, prefix_len) == 0 &&
+	    (prefix[prefix_len] == ':' || prefix[prefix_len] == '\0')) {
+	    if (residual) {
+		if (prefix[prefix_len] == ':' && prefix[prefix_len + 1] != '\0')
+		    *residual = &prefix[prefix_len + 1];
+		else
+		    *residual = NULL;
+	    }
+
 	    return context->cc_ops[i];
 	}
     }
-    free(p);
+
     return NULL;
 }
 

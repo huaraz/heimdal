@@ -18,6 +18,7 @@ dnl Checks for programs.
 AC_PROG_CC
 AM_PROG_CC_C_O
 AC_PROG_CPP
+AC_CHECK_PROG(CLANG_FORMAT, clang-format, [clang-format], [no])
 
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
@@ -136,6 +137,11 @@ if test "$enable_hdb_openldap_module" = yes -a "$with_openldap" = yes; then
     AC_DEFINE(OPENLDAP_MODULE, 1, [Define if you want support for hdb ldap module])
 fi
 AM_CONDITIONAL(OPENLDAP_MODULE, test "$enable_hdb_openldap_module" = yes -a "$with_openldap" = yes)
+
+AC_ARG_ENABLE(asn1-templating, 
+	AS_HELP_STRING([--disable-asn1-templating],
+		[if you want disable to use of the ASN.1 templating compiler]))
+AM_CONDITIONAL(ASN1_TEMPLATING, test "x$enable_asn1_templating" != xno)
 
 dnl
 dnl Optional modules, pk-init, digest, kx509

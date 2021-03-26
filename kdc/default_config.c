@@ -101,12 +101,12 @@ krb5_kdc_get_config(krb5_context context, krb5_kdc_configuration **config)
     c->enable_pkinit = FALSE;
     c->pkinit_princ_in_cert = TRUE;
     c->pkinit_require_binding = TRUE;
+    c->pkinit_max_life_from_cert_extension = FALSE;
+    c->pkinit_max_life_bound = 0;
+    c->pkinit_dh_min_bits = 1024;
     c->db = NULL;
     c->num_db = 0;
     c->logf = NULL;
-    c->enable_derived_keys = FALSE;
-    c->derived_keys_ndots = 2;
-    c->derived_keys_maxdots = -1;
 
     c->num_kdc_processes =
         krb5_config_get_int_default(context, NULL, c->num_kdc_processes,
@@ -286,17 +286,22 @@ krb5_kdc_get_config(krb5_context context, krb5_kdc_configuration **config)
 				    0,
 				    "kdc", "pkinit_dh_min_bits", NULL);
 
-    c->enable_derived_keys =
-	krb5_config_get_bool_default(context, NULL, c->enable_derived_keys,
-				     "kdc", "enable_derived_keys", NULL);
+    c->pkinit_max_life_from_cert_extension =
+        krb5_config_get_bool_default(context, NULL,
+                                     c->pkinit_max_life_from_cert_extension,
+                                     "kdc",
+                                     "pkinit_max_life_from_cert_extension",
+                                     NULL);
 
-    c->derived_keys_ndots =
-	krb5_config_get_int_default(context, NULL, c->derived_keys_ndots,
-				    "kdc", "derived_keys_ndots", NULL);
+    c->pkinit_max_life_bound =
+         krb5_config_get_time_default(context, NULL, 0, "kdc",
+                                      "pkinit_max_life_bound",
+                                      NULL);
 
-    c->derived_keys_maxdots =
-	krb5_config_get_int_default(context, NULL, c->derived_keys_maxdots,
-				    "kdc", "derived_keys_maxdots", NULL);
+    c->pkinit_max_life_from_cert =
+         krb5_config_get_time_default(context, NULL, 0, "kdc",
+                                      "pkinit_max_life_from_cert",
+                                      NULL);
 
     *config = c;
 

@@ -217,6 +217,24 @@ hx509_context_init(hx509_context *contextp)
     return 0;
 }
 
+HX509_LIB_FUNCTION int HX509_LIB_CALL
+hx509_set_log_dest(hx509_context context, heim_log_facility *fac)
+{
+    return heim_set_log_dest(context->hcontext, fac);
+}
+
+HX509_LIB_FUNCTION int HX509_LIB_CALL
+hx509_set_debug_dest(hx509_context context, heim_log_facility *fac)
+{
+    return heim_set_debug_dest(context->hcontext, fac);
+}
+
+HX509_LIB_FUNCTION int HX509_LIB_CALL
+hx509_set_warn_dest(hx509_context context, heim_log_facility *fac)
+{
+    return heim_set_warn_dest(context->hcontext, fac);
+}
+
 /**
  * Selects if the hx509_revoke_verify() function is going to require
  * the existans of a revokation method (OCSP, CRL) or not. Note that
@@ -1042,14 +1060,14 @@ check_basic_constraints(hx509_context context, const Certificate *cert,
 	return ret;
     switch(type) {
     case PROXY_CERT:
-	if (bc.cA != NULL && *bc.cA)
+	if (bc.cA)
 	    ret = HX509_PARENT_IS_CA;
 	break;
     case EE_CERT:
 	ret = 0;
 	break;
     case CA_CERT:
-	if (bc.cA == NULL || !*bc.cA)
+	if (!bc.cA)
 	    ret = HX509_PARENT_NOT_CA;
 	else if (bc.pathLenConstraint)
 	    if (depth - 1 > *bc.pathLenConstraint)
@@ -1616,6 +1634,63 @@ hx509_cert_get_notAfter(hx509_cert p)
 }
 
 /**
+ * Get a maximum Kerberos credential lifetime from a Heimdal certificate
+ * extension.
+ *
+ * @param context hx509 context.
+ * @param cert Certificate.
+ * @param bound If larger than zero, return no more than this.
+ *
+ * @return maximum ticket lifetime.
+ */
+HX509_LIB_FUNCTION time_t HX509_LIB_CALL
+hx509_cert_get_pkinit_max_life(hx509_context context,
+                               hx509_cert cert,
+                               time_t bound)
+{
+    HeimPkinitPrincMaxLifeSecs r = 0;
+    size_t sz, i;
+    time_t b, e;
+    int ret;
+
+    for (i = 0; i < cert->data->tbsCertificate.extensions->len; i++) {
+        Extension *ext = &cert->data->tbsCertificate.extensions->val[i];
+
+        if (ext->_ioschoice_extnValue.element !=
+            choice_Extension_iosnumunknown &&
+            ext->_ioschoice_extnValue.element !=
+            choice_Extension_iosnum_id_heim_ce_pkinit_princ_max_life)
+            continue;
+        if (ext->_ioschoice_extnValue.element == choice_Extension_iosnumunknown &&
+            der_heim_oid_cmp(&asn1_oid_id_heim_ce_pkinit_princ_max_life, &ext->extnID))
+            continue;
+        if (ext->_ioschoice_extnValue.u.ext_HeimPkinitPrincMaxLife) {
+            r = *ext->_ioschoice_extnValue.u.ext_HeimPkinitPrincMaxLife;
+        } else {
+            ret = decode_HeimPkinitPrincMaxLifeSecs(ext->extnValue.data,
+                                                    ext->extnValue.length,
+                                                    &r, &sz);
+            /* No need to free_HeimPkinitPrincMaxLifeSecs(); it's an int */
+            if (ret || r < 1)
+                return 0;
+        }
+        if (bound > 0 && r > bound)
+            return bound;
+        return r;
+    }
+    if (hx509_cert_check_eku(context, cert,
+                             &asn1_oid_id_heim_eku_pkinit_certlife_is_max_life, 0))
+        return 0;
+    b = hx509_cert_get_notBefore(cert);
+    e = hx509_cert_get_notAfter(cert);
+    if (e > b)
+        r = e - b;
+    if (bound > 0 && r > bound)
+        return bound;
+    return r;
+}
+
+/**
  * Get the SubjectPublicKeyInfo structure from the hx509 certificate.
  *
  * @param context a hx509 context.
@@ -2056,7 +2131,7 @@ match_tree(const GeneralSubtrees *t, const Certificate *c, int *match)
 
 	    memset(&certname, 0, sizeof(certname));
 	    certname.element = choice_GeneralName_directoryName;
-	    certname.u.directoryName.element = (enum GeneralName_directoryName_enum)
+	    certname.u.directoryName.element = (enum Name_enum)
 		c->tbsCertificate.subject.element;
 	    certname.u.directoryName.u.rdnSequence =
 		c->tbsCertificate.subject.u.rdnSequence;
@@ -2360,9 +2435,10 @@ hx509_verify_path(hx509_context context,
 		 * EE checking below.
 		 */
 		type = EE_CERT;
-		/* FALLTHOUGH */
+                /* FALLTHROUGH */
 	    }
 	}
+        /* FALLTHROUGH */
 	case EE_CERT:
 	    /*
 	     * If there where any proxy certificates in the chain
@@ -3471,12 +3547,11 @@ hx509_cert_check_eku(hx509_context context, hx509_cert cert,
 	    return 0;
 	}
 	if (allow_any_eku) {
-#if 0
-	    if (der_heim_oid_cmp(id_any_eku, &e.val[i]) == 0) {
+	    if (der_heim_oid_cmp(&asn1_oid_id_x509_ce_anyExtendedKeyUsage,
+                                 &e.val[i]) == 0) {
 		free_ExtKeyUsage(&e);
 		return 0;
 	    }
-#endif
 	}
     }
     free_ExtKeyUsage(&e);

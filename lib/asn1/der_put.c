@@ -441,6 +441,104 @@ der_put_oid (unsigned char *p, size_t len,
     return 0;
 }
 
+/*
+ * Output a copy of the DER TLV at `p' with a different outermost tag.
+ *
+ * This is used in the implementation of IMPLICIT tags in generated decoder
+ * functions.
+ */
+int
+der_replace_tag(const unsigned char *p, size_t len,
+                unsigned char **out, size_t *outlen,
+                Der_class class, Der_type type,
+                unsigned int tag)
+{
+    Der_class found_class;
+    Der_type found_type;
+    unsigned int found_tag;
+    size_t payload_len, l, tag_len, len_len;
+    int e;
+
+    e = der_get_tag(p, len, &found_class, &found_type, &found_tag, &l);
+    if (e)
+        return e;
+    if (found_type != type)
+        return ASN1_TYPE_MISMATCH;
+    /* We don't care what found_class and found_tag are though */
+    tag_len = der_length_tag(tag);
+    p += l;
+    len -= l;
+    e = der_get_length(p, len, &payload_len, &len_len);
+    if (e)
+        return e;
+    if (payload_len > len)
+        return ASN1_OVERFLOW;
+    /*
+     * `p' now points at the payload; `*out' + the length of the tag points at
+     * where we should copy the DER length and the payload.
+     */
+    if ((*out = malloc(*outlen = tag_len + len_len + payload_len)) == NULL)
+        return ENOMEM;
+    memcpy(*out + tag_len, p, len_len + payload_len);
+
+    /* Put the new tag */
+    e = der_put_tag(*out + tag_len - 1, tag_len, class, type, tag, &l);
+    if (e)
+        return e;
+    if (l != tag_len)
+        return ASN1_OVERFLOW;
+    return 0;
+}
+
+#if 0
+int
+der_encode_implicit(unsigned char *p, size_t len,
+                    asn1_generic_encoder_f encoder,
+                    void *obj, size_t *size,
+                    Der_type type,
+                    unsigned int ttag, Der_class iclass, unsigned int itag)
+{
+    size_t ttaglen = der_length_tag(ttag);
+    size_t itaglen = der_length_tag(itag);
+    size_t l;
+    unsigned char *p2;
+    int e;
+
+    /* Attempt to encode in place */
+    e = encoder(p, len, obj, size);
+    if (e == 0) {
+        /* Fits!  Rewrite tag, adjust reported size. */
+        e = der_put_tag(p + ttaglen - 1, itaglen, iclass, type, itag, &l);
+        if (e == 0) {
+            (*size) -= ttaglen;
+            (*size) += itaglen;
+        }
+        return e;
+    }
+    if (e != ASN1_OVERFLOW || itaglen <= ttaglen)
+        return e;
+
+    /*
+     * Did not fit because ttaglen > itaglen and this was the last / only thing
+     * being encoded in a buffer of just the right size.
+     */
+    if ((p2 = malloc(len + ttaglen - itaglen)) == NULL)
+        e = ENOMEM;
+    if (e == 0)
+        e = encoder(p2 + len + ttaglen - itaglen - 1, len + ttaglen - itaglen,
+                    obj, size);
+    if (e == 0)
+        e = der_put_tag(p2 + ttaglen - 1, itaglen, iclass, type, itag, &l);
+    if (e == 0) {
+        (*size) -= ttaglen;
+        (*size) += itaglen;
+        memcpy(p - *size, p2 + ttaglen - itaglen, *size);
+    }
+    free(p2);
+    return e;
+}
+#endif
+
 int
 der_put_tag (unsigned char *p, size_t len, Der_class class, Der_type type,
 	     unsigned int tag, size_t *size)
@@ -501,6 +599,7 @@ _heim_time2generalizedtime (time_t t, heim_octet_string *s, int gtimep)
 {
      struct tm tm;
      const size_t len = gtimep ? 15 : 13;
+     int bytes;
 
      s->data = NULL;
      s->length = 0;
@@ -511,13 +610,16 @@ _heim_time2generalizedtime (time_t t, heim_octet_string *s, int gtimep)
 	 return ENOMEM;
      s->length = len;
      if (gtimep)
-	 snprintf (s->data, len + 1, "%04d%02d%02d%02d%02d%02dZ",
-		   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-		   tm.tm_hour, tm.tm_min, tm.tm_sec);
+	 bytes = snprintf(s->data, len + 1, "%04d%02d%02d%02d%02d%02dZ",
+                          tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                          tm.tm_hour, tm.tm_min, tm.tm_sec);
      else
-	 snprintf (s->data, len + 1, "%02d%02d%02d%02d%02d%02dZ",
-		   tm.tm_year % 100, tm.tm_mon + 1, tm.tm_mday,
-		   tm.tm_hour, tm.tm_min, tm.tm_sec);
+	 bytes = snprintf(s->data, len + 1, "%02d%02d%02d%02d%02d%02dZ",
+                          tm.tm_year % 100, tm.tm_mon + 1, tm.tm_mday,
+                          tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+     if (bytes > len)
+         abort();
 
      return 0;
 }

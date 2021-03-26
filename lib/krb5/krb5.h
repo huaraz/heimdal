@@ -48,6 +48,8 @@
 #include <k5e1_err.h>
 
 #include <krb5_asn1.h>
+typedef Krb5Int32 krb5int32;
+typedef Krb5UInt32 krb5uint32;
 
 /* name confusion with MIT */
 #ifndef KRB5KDC_ERR_KEY_EXP
@@ -833,11 +835,12 @@ typedef struct krb5_verify_opt {
 struct krb5_krbhst_data;
 typedef struct krb5_krbhst_data *krb5_krbhst_handle;
 
-#define KRB5_KRBHST_KDC		1
-#define KRB5_KRBHST_ADMIN	2
-#define KRB5_KRBHST_CHANGEPW	3
-#define KRB5_KRBHST_KRB524	4
-#define KRB5_KRBHST_KCA		5
+#define KRB5_KRBHST_KDC			1
+#define KRB5_KRBHST_ADMIN		2
+#define KRB5_KRBHST_CHANGEPW		3
+#define KRB5_KRBHST_KRB524		4
+#define KRB5_KRBHST_KCA			5
+#define KRB5_KRBHST_READONLY_ADMIN	6
 
 typedef struct krb5_krbhst_info {
     enum { KRB5_KRBHST_UDP,

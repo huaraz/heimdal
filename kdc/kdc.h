@@ -85,6 +85,9 @@ typedef struct krb5_kdc_configuration {
     int pkinit_dh_min_bits;
     int pkinit_require_binding;
     int pkinit_allow_proxy_certs;
+    int pkinit_max_life_from_cert_extension;
+    krb5_timestamp pkinit_max_life_from_cert;
+    krb5_timestamp pkinit_max_life_bound;
 
     krb5_log_facility *logf;
 
@@ -94,10 +97,6 @@ typedef struct krb5_kdc_configuration {
     size_t max_datagram_reply_length;
 
     int enable_kx509;
-
-    krb5_boolean enable_derived_keys;
-    int derived_keys_ndots;
-    int derived_keys_maxdots;
 
     const char *app;
 } krb5_kdc_configuration;
